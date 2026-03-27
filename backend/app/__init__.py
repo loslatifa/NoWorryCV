@@ -1,0 +1,2 @@
+"""NoWorryCV backend package."""
+
