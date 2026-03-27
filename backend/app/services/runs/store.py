@@ -41,15 +41,25 @@ class InMemoryRunStore:
             self._jobs[run_id] = updated
             return updated.model_copy(deep=True)
 
-    def mark_running(self, run_id: str, stage: str, percent: int, message: str) -> Optional[TailorRunJobStatus]:
-        return self.update(
-            run_id,
-            status="running",
-            current_stage=stage,
-            progress_percent=max(0, min(99, percent)),
-            status_message=message,
-            error_message="",
-        )
+    def mark_running(
+        self,
+        run_id: str,
+        stage: str,
+        percent: int,
+        message: str,
+        review_cards: Optional[List[KnowledgeReviewCard]] = None,
+    ) -> Optional[TailorRunJobStatus]:
+        fields = {
+            "run_id": run_id,
+            "status": "running",
+            "current_stage": stage,
+            "progress_percent": max(0, min(99, percent)),
+            "status_message": message,
+            "error_message": "",
+        }
+        if review_cards is not None:
+            fields["review_cards"] = review_cards
+        return self.update(**fields)
 
     def mark_completed(self, run_id: str, result: TailorRunResult, message: str) -> Optional[TailorRunJobStatus]:
         return self.update(

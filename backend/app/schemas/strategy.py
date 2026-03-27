@@ -3,6 +3,7 @@ from typing import Dict, List, Optional
 from pydantic import BaseModel, Field
 
 from backend.app.schemas.common import TraceabilityRecord
+from backend.app.schemas.prep import InterviewPrepDocument, JDReviewDocument
 
 
 class GapAnalysis(BaseModel):
@@ -57,3 +58,5 @@ class FinalResumePackage(BaseModel):
     change_log: List[str] = Field(default_factory=list)
     fit_summary: str = ""
     risk_notes: List[str] = Field(default_factory=list)
+    jd_review_doc: Optional[JDReviewDocument] = None
+    interview_prep_doc: Optional[InterviewPrepDocument] = None

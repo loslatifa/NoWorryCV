@@ -13,6 +13,10 @@ class KnowledgeReviewCard(BaseModel):
     keywords: List[str] = Field(default_factory=list)
 
 
+class KnowledgeReviewCardDeck(BaseModel):
+    review_cards: List[KnowledgeReviewCard] = Field(default_factory=list)
+
+
 class JDProfile(BaseModel):
     job_title: str = ""
     department: str = ""

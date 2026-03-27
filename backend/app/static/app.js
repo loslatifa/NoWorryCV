@@ -20,8 +20,10 @@ const tipsTrack = document.getElementById("tips-track");
 
 const stageDefinitions = [
   { key: "queued", label: "任务排队中" },
-  { key: "parse_resume", label: "正在解析简历结构与事实卡片" },
   { key: "analyze_jd", label: "正在分析 JD 重点与招聘类型" },
+  { key: "review_cards", label: "正在生成 JD 复习看板" },
+  { key: "jd_review_doc", label: "正在整理 JD 复习文档" },
+  { key: "parse_resume", label: "正在解析简历结构与事实卡片" },
   { key: "gap_analysis", label: "正在匹配经历、关键词和能力缺口" },
   { key: "strategy", label: "正在制定改写策略" },
   { key: "rewrite", label: "正在生成定制简历草稿" },
@@ -70,6 +72,8 @@ function renderResult(result) {
   document.getElementById("stop-reason").textContent = result.stop_reason || "-";
   document.getElementById("fit-summary").textContent = result.final_package.fit_summary || "";
   document.getElementById("resume-markdown").textContent = result.final_package.draft.markdown || "";
+  document.getElementById("jd-review-doc").textContent = result.final_package.jd_review_doc?.markdown || "";
+  document.getElementById("interview-prep-doc").textContent = result.final_package.interview_prep_doc?.markdown || "";
 
   renderList("change-log", result.final_package.change_log || []);
   renderList("risk-notes", result.final_package.risk_notes || []);
@@ -117,8 +121,10 @@ function getVisibleStageIndex(stageKey, progress) {
   }
   const mapping = {
     queued: 0,
-    parse_resume: 0,
-    analyze_jd: 1,
+    analyze_jd: 0,
+    review_cards: 1,
+    jd_review_doc: 1,
+    parse_resume: 1,
     gap_analysis: 2,
     strategy: 2,
     rewrite: 3,
@@ -150,7 +156,7 @@ function startWaitingExperience(jdText) {
     {
       title: "JD 知识点整理中",
       focus_area: "等待生成",
-      review_tip: "系统会先从 JD 的硬技能、岗位能力和业务场景里提炼知识点卡片。",
+      review_tip: "系统会先分析 JD 并生成复习卡片，再开始解析简历和改写策略。",
       sample_question: "你可以先想想：这个岗位最可能追问哪 2 到 3 个知识点？",
       keywords: jdText ? [jdText.slice(0, 18)] : [],
       ticker: "正在根据 JD 提炼复习卡片",
@@ -255,7 +261,7 @@ form.addEventListener("submit", async (event) => {
   formData.append("max_iterations", document.getElementById("max-iterations").value);
 
   submitButton.disabled = true;
-  setStatus("正在创建任务并启动网页快速模式，你可以在等待时复习下方 JD 知识点。", "loading");
+  setStatus("正在创建任务并启动深度 Agent 模式，你可以在等待时复习下方 JD 知识点。", "loading");
   startWaitingExperience(document.getElementById("jd-text").value);
 
   try {

@@ -31,6 +31,8 @@ def test_upload_endpoint_accepts_markdown_resume(monkeypatch) -> None:
     payload = response.json()
     assert payload["status"] == "completed"
     assert payload["final_package"]["draft"]["markdown"]
+    assert payload["final_package"]["jd_review_doc"]["markdown"]
+    assert payload["final_package"]["interview_prep_doc"]["markdown"]
 
 
 def test_async_upload_job_exposes_progress_and_result(monkeypatch) -> None:
@@ -58,15 +60,17 @@ def test_async_upload_job_exposes_progress_and_result(monkeypatch) -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload["run_id"]
-    assert payload["review_cards"]
-    assert payload["review_cards"][0]["title"]
+    assert payload["current_stage"] == "queued"
 
     final_payload = None
+    saw_review_cards = False
     for _ in range(40):
         status_response = client.get("/api/v1/tailor-runs/{0}/status".format(payload["run_id"]))
         assert status_response.status_code == 200
         job = status_response.json()
         assert job["progress_percent"] >= 0
+        if job["review_cards"]:
+            saw_review_cards = True
         if job["status"] == "completed":
             final_payload = job
             break
@@ -74,6 +78,37 @@ def test_async_upload_job_exposes_progress_and_result(monkeypatch) -> None:
         time.sleep(0.05)
 
     assert final_payload is not None
+    assert saw_review_cards
     assert final_payload["result"]["status"] == "completed"
     assert final_payload["result"]["jd_profile"]["hiring_track"] == "campus"
     assert final_payload["review_cards"]
+    assert final_payload["result"]["jd_profile"]["review_cards"]
+    assert final_payload["result"]["final_package"]["jd_review_doc"]["markdown"]
+    assert final_payload["result"]["final_package"]["interview_prep_doc"]["markdown"]
+
+
+def test_upload_endpoint_requires_live_llm_when_strict_mode_enabled(monkeypatch) -> None:
+    monkeypatch.setenv("LLM_PROVIDER", "stub")
+    monkeypatch.setenv("LLM_STRICT_MODE", "true")
+    app = create_app()
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/v1/tailor-runs/upload",
+        files={
+            "resume_file": (
+                "resume.md",
+                "# Resume\n\n张三\n\n技能\nPython, SQL".encode("utf-8"),
+                "text/markdown",
+            )
+        },
+        data={
+            "jd_text": "高级产品经理\n要求：SQL，数据分析",
+            "candidate_notes": "希望强调数据分析",
+            "output_language": "zh",
+            "max_iterations": "1",
+        },
+    )
+
+    assert response.status_code == 503
+    assert "已关闭启发式 fallback" in response.json()["detail"]

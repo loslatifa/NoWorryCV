@@ -2,12 +2,12 @@ from threading import Thread
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
-from backend.app.agents.jd_analyst import JDAnalystAgent
 from backend.app.agents.orchestrator import ResumeTailorOrchestrator
 from backend.app.graph.resume_tailor_graph import analyze_jd_payload, parse_resume_payload, run_tailor_pipeline
 from backend.app.schemas.candidate import CandidateProfile
 from backend.app.schemas.jd import JDProfile
 from backend.app.schemas.run_state import TailorRunInput, TailorRunJobStatus, TailorRunResult
+from backend.app.services.llm.structured import StructuredLLMError
 from backend.app.services.parsers.file_parser import extract_text_from_file
 from backend.app.services.runs.store import get_run_store
 
@@ -16,17 +16,26 @@ router = APIRouter(tags=["tailor"])
 
 @router.post("/resume/parse", response_model=CandidateProfile)
 def parse_resume(payload: TailorRunInput) -> CandidateProfile:
-    return parse_resume_payload(payload)
+    try:
+        return parse_resume_payload(payload)
+    except StructuredLLMError as exc:
+        raise _llm_required_error(exc) from exc
 
 
 @router.post("/jd/analyze", response_model=JDProfile)
 def analyze_jd(payload: TailorRunInput) -> JDProfile:
-    return analyze_jd_payload(payload)
+    try:
+        return analyze_jd_payload(payload)
+    except StructuredLLMError as exc:
+        raise _llm_required_error(exc) from exc
 
 
 @router.post("/tailor-runs", response_model=TailorRunResult)
 def create_tailor_run(payload: TailorRunInput) -> TailorRunResult:
-    return run_tailor_pipeline(payload)
+    try:
+        return run_tailor_pipeline(payload)
+    except StructuredLLMError as exc:
+        raise _llm_required_error(exc) from exc
 
 
 @router.post("/tailor-runs/upload", response_model=TailorRunResult)
@@ -57,7 +66,10 @@ async def create_tailor_run_from_upload(
         output_language=output_language,
         max_iterations=max_iterations,
     )
-    return run_tailor_pipeline(payload)
+    try:
+        return run_tailor_pipeline(payload)
+    except StructuredLLMError as exc:
+        raise _llm_required_error(exc) from exc
 
 
 @router.post("/tailor-runs/upload-jobs", response_model=TailorRunJobStatus)
@@ -89,11 +101,16 @@ async def create_tailor_run_job_from_upload(
         max_iterations=max_iterations,
     )
     store = get_run_store()
-    review_cards = JDAnalystAgent().run(jd_text, force_fallback=True).review_cards
-    job = store.create("任务已创建，等待开始。", review_cards=review_cards)
+    job = store.create("任务已创建，等待开始。")
 
-    def progress_callback(stage: str, percent: int, message: str) -> None:
-        store.mark_running(job.run_id, stage=stage, percent=percent, message=message)
+    def progress_callback(stage: str, percent: int, message: str, review_cards=None) -> None:
+        store.mark_running(
+            job.run_id,
+            stage=stage,
+            percent=percent,
+            message=message,
+            review_cards=review_cards,
+        )
 
     def runner() -> None:
         try:
@@ -104,7 +121,7 @@ async def create_tailor_run_job_from_upload(
             store.mark_failed(job.run_id, str(exc))
 
     Thread(target=runner, daemon=True).start()
-    running_job = store.mark_running(job.run_id, stage="queued", percent=5, message="任务已排队，准备开始解析。")
+    running_job = store.mark_running(job.run_id, stage="queued", percent=5, message="任务已排队，准备优先分析 JD。")
     return running_job or job
 
 
@@ -129,5 +146,12 @@ def _build_upload_payload(
         candidate_notes=candidate_notes,
         output_language=output_language,
         max_iterations=max_iterations,
-        processing_mode="fast",
+        processing_mode="full",
+    )
+
+
+def _llm_required_error(exc: Exception) -> HTTPException:
+    return HTTPException(
+        status_code=503,
+        detail="当前已关闭启发式 fallback，系统需要可用的大模型链路才能运行。原始错误：{0}".format(str(exc)),
     )

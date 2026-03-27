@@ -9,6 +9,7 @@ from backend.app.services.prompt_loader import reset_prompt_loader_cache
 @pytest.fixture(autouse=True)
 def reset_runtime_caches(monkeypatch) -> None:
     monkeypatch.setenv("LLM_PROVIDER", "stub")
+    monkeypatch.setenv("LLM_STRICT_MODE", "false")
     monkeypatch.delenv("QWEN_API_KEY", raising=False)
     monkeypatch.delenv("DASHSCOPE_API_KEY", raising=False)
     monkeypatch.delenv("LLM_API_KEY", raising=False)

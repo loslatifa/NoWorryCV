@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field, field_validator
 from backend.app.schemas.candidate import CandidateProfile
 from backend.app.schemas.common import AgentExecutionRecord, FactCard
 from backend.app.schemas.jd import JDProfile, KnowledgeReviewCard
+from backend.app.schemas.prep import InterviewPrepDocument, JDReviewDocument
 from backend.app.schemas.review import ReviewBundle
 from backend.app.schemas.strategy import FinalResumePackage, GapAnalysis, ResumeDraft, RewriteStrategy
 
@@ -44,10 +45,12 @@ class TailorRunState(BaseModel):
     candidate_profile: Optional[CandidateProfile] = None
     fact_cards: List[FactCard] = Field(default_factory=list)
     jd_profile: Optional[JDProfile] = None
+    jd_review_doc: Optional[JDReviewDocument] = None
     gap_analysis: Optional[GapAnalysis] = None
     rewrite_strategy: Optional[RewriteStrategy] = None
     drafts: List[ResumeDraft] = Field(default_factory=list)
     reviews: List[ReviewBundle] = Field(default_factory=list)
+    interview_prep_doc: Optional[InterviewPrepDocument] = None
     final_package: Optional[FinalResumePackage] = None
     stop_reason: str = ""
     execution_log: List[AgentExecutionRecord] = Field(default_factory=list)

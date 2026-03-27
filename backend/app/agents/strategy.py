@@ -1,6 +1,7 @@
 from typing import List
 
 from backend.app.agents.base import BaseAgent
+from backend.app.agents.base import _NO_FALLBACK
 from backend.app.services.llm.structured import StructuredLLMError
 from backend.app.schemas.candidate import CandidateProfile
 from backend.app.schemas.common import FactCard
@@ -23,8 +24,9 @@ class StrategyAgent(BaseAgent):
         force_fallback: bool = False,
     ) -> RewriteStrategy:
         fallback = self._run_fallback(candidate_profile, gap_analysis, fact_cards, jd_profile, language)
-        if force_fallback or not self.llm_service.is_available:
-            return fallback
+        fallback_result = self.maybe_use_fallback(fallback, force_fallback=force_fallback)
+        if fallback_result is not _NO_FALLBACK:
+            return fallback_result
 
         try:
             strategy = self.invoke_structured(
@@ -38,8 +40,8 @@ class StrategyAgent(BaseAgent):
                 response_model=RewriteStrategy,
             )
             return self._normalize_strategy(strategy, fact_cards, fallback)
-        except StructuredLLMError:
-            return fallback
+        except StructuredLLMError as exc:
+            return self.fallback_on_error(exc, fallback)
 
     def _run_fallback(
         self,
@@ -64,10 +66,10 @@ class StrategyAgent(BaseAgent):
             terminology_map={token: token for token in gap_analysis.strengths[:8]},
             tone_rules=self._tone_rules(language, hiring_track),
             forbidden_claims=gap_analysis.missing_keywords[:8],
-            max_experiences=2 if is_campus_like else 3,
-            max_bullets_per_experience=2 if is_campus_like else 3,
+            max_experiences=3 if is_campus_like else 4,
+            max_bullets_per_experience=3 if is_campus_like else 4,
             max_skills=10 if is_campus_like else 12,
-            include_projects=has_projects if is_campus_like else (has_projects and bool(gap_analysis.transferable_experiences)),
+            include_projects=has_projects if is_campus_like else has_projects,
             summary_style="potential_and_evidence" if is_campus_like else "impact_and_scope",
             revision_notes=self._revision_notes_for_track(hiring_track, has_projects, has_education),
         )
@@ -79,8 +81,9 @@ class StrategyAgent(BaseAgent):
         force_fallback: bool = False,
     ) -> RewriteStrategy:
         fallback = self._fallback_refine(strategy, critic_report)
-        if force_fallback or not self.llm_service.is_available:
-            return fallback
+        fallback_result = self.maybe_use_fallback(fallback, force_fallback=force_fallback)
+        if fallback_result is not _NO_FALLBACK:
+            return fallback_result
 
         try:
             refined = self.invoke_structured(
@@ -91,8 +94,8 @@ class StrategyAgent(BaseAgent):
                 response_model=RewriteStrategy,
             )
             return self._normalize_strategy(refined, [], fallback)
-        except StructuredLLMError:
-            return fallback
+        except StructuredLLMError as exc:
+            return self.fallback_on_error(exc, fallback)
 
     def _fallback_refine(self, strategy: RewriteStrategy, critic_report: CriticReport) -> RewriteStrategy:
         revision_notes = list(strategy.revision_notes)

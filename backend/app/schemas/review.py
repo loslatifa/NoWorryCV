@@ -7,6 +7,9 @@ class ComplianceReport(BaseModel):
     risk_level: str = "low"
     unsupported_claims: List[str] = Field(default_factory=list)
     blocked_phrases: List[str] = Field(default_factory=list)
+    exaggeration_warnings: List[str] = Field(default_factory=list)
+    seniority_mismatches: List[str] = Field(default_factory=list)
+    keyword_stuffing_warnings: List[str] = Field(default_factory=list)
 
 
 class ATSReport(BaseModel):
@@ -29,4 +32,3 @@ class ReviewBundle(BaseModel):
     compliance_report: ComplianceReport
     ats_report: ATSReport
     critic_report: CriticReport
-

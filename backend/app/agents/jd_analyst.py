@@ -2,15 +2,38 @@ import re
 from typing import List
 
 from backend.app.agents.base import BaseAgent
+from backend.app.agents.base import _NO_FALLBACK
 from backend.app.services.llm.structured import StructuredLLMError
 from backend.app.schemas.jd import JDProfile
 from backend.app.services.parsers.file_parser import detect_language, first_non_empty_line
-from backend.app.services.review_cards import build_review_cards
 from backend.app.services.scoring.heuristics import canonicalize_skills, extract_known_skills, extract_tokens, normalize_token, split_inline_items, unique_preserve_order
 
 
 class JDAnalystAgent(BaseAgent):
     name = "jd_analyst"
+    RESPONSIBILITY_LABELS = [
+        "职责",
+        "岗位职责",
+        "responsibilities",
+        "what you'll do",
+        "you will",
+    ]
+    MUST_HAVE_LABELS = [
+        "任职要求",
+        "要求",
+        "requirements",
+        "must have",
+        "required",
+        "qualification",
+        "qualifications",
+    ]
+    NICE_TO_HAVE_LABELS = [
+        "加分项",
+        "preferred",
+        "plus",
+        "bonus",
+        "优先",
+    ]
     LABEL_PREFIXES = [
         "职责：",
         "职责:",
@@ -48,12 +71,19 @@ class JDAnalystAgent(BaseAgent):
         "掌握",
         "具备",
         "了解",
+        "2025届",
+        "2026届",
+        "2027届",
+        "校招",
+        "校园招聘",
+        "应届毕业生",
     }
 
     def run(self, jd_text: str, force_fallback: bool = False) -> JDProfile:
         fallback = self._run_fallback(jd_text)
-        if force_fallback or not self.llm_service.is_available:
-            return fallback
+        fallback_result = self.maybe_use_fallback(fallback, force_fallback=force_fallback)
+        if fallback_result is not _NO_FALLBACK:
+            return fallback_result
 
         try:
             profile = self.invoke_structured(
@@ -67,30 +97,28 @@ class JDAnalystAgent(BaseAgent):
             profile.must_have_skills = self._normalize_skill_items(profile.must_have_skills) or fallback.must_have_skills
             profile.nice_to_have_skills = self._normalize_skill_items(profile.nice_to_have_skills) or fallback.nice_to_have_skills
             profile.keywords = self._clean_keywords(profile.keywords or fallback.keywords, profile.job_title)
-            profile.review_cards = build_review_cards(profile, jd_text)
             return profile
-        except StructuredLLMError:
-            return fallback
+        except StructuredLLMError as exc:
+            return self.fallback_on_error(exc, fallback)
 
     def _run_fallback(self, jd_text: str) -> JDProfile:
         lines = [line.strip() for line in jd_text.splitlines() if line.strip()]
-        responsibilities = self._normalize_sentences(
-            [self._remove_label_prefix(self._strip_bullet(line)) for line in lines if self._looks_like_responsibility(line)]
-        )
-        must_have = self._normalize_skill_items(
-            [item for line in lines if self._looks_like_must_have(line) for item in self._extract_requirement_items(line)]
-        )
-        nice_to_have = self._normalize_skill_items(
-            [item for line in lines if self._looks_like_nice_to_have(line) for item in self._extract_requirement_items(line)]
-        )
+        title_line = first_non_empty_line(jd_text) or ""
+        section_lines = self._extract_section_lines(lines[1:] if lines and lines[0] == title_line else lines)
+        responsibilities = self._normalize_sentences(section_lines["responsibilities"])
+        must_have = self._normalize_skill_items(section_lines["must_have"])
+        nice_to_have = self._normalize_skill_items(section_lines["nice_to_have"])
 
         detected_skills = canonicalize_skills(extract_known_skills(jd_text))
-        job_title = self._clean_job_title(first_non_empty_line(jd_text) or "")
+        job_title = self._clean_job_title(title_line)
         keywords = self._clean_keywords(
-            must_have + nice_to_have + detected_skills + extract_tokens(" ".join(responsibilities[:6] + lines[:6])),
+            must_have
+            + nice_to_have
+            + detected_skills
+            + extract_tokens(" ".join(responsibilities[:6] + must_have[:6] + nice_to_have[:4])),
             job_title,
         )
-        must_have_skills = unique_preserve_order(must_have + detected_skills[:6])
+        must_have_skills = unique_preserve_order(must_have + [skill for skill in detected_skills if skill not in nice_to_have])
         nice_to_have_skills = unique_preserve_order(nice_to_have)
 
         profile = JDProfile(
@@ -105,7 +133,6 @@ class JDAnalystAgent(BaseAgent):
             domain_signals=self._detect_domain_signals(jd_text),
             language=detect_language(jd_text, fallback="en"),
         )
-        profile.review_cards = build_review_cards(profile, jd_text)
         return profile
 
     def _strip_bullet(self, line: str) -> str:
@@ -137,9 +164,19 @@ class JDAnalystAgent(BaseAgent):
 
     def _extract_requirement_items(self, line: str) -> List[str]:
         stripped = self._remove_label_prefix(self._strip_bullet(line))
-        normalized = stripped.replace(" and ", "、").replace("以及", "、").replace("及", "、")
-        items = split_inline_items(normalized)
-        return [self._clean_requirement_item(item) for item in items if self._clean_requirement_item(item)]
+        normalized = (
+            stripped.replace(" and ", "、")
+            .replace("以及", "、")
+            .replace("及", "、")
+            .replace("并且", "、")
+            .replace("并", "、")
+            .replace("以及具备", "、")
+        )
+        items: List[str] = []
+        for chunk in split_inline_items(normalized):
+            items.extend(self._split_requirement_phrase(chunk))
+        cleaned_items = [self._clean_requirement_item(item) for item in items if self._clean_requirement_item(item)]
+        return [item for item in cleaned_items if self._is_requirement_item_worthy(item)]
 
     def _detect_seniority(self, text: str) -> str:
         lower = text.lower()
@@ -212,7 +249,9 @@ class JDAnalystAgent(BaseAgent):
     def _clean_job_title(self, title: str) -> str:
         value = (title or "").strip()
         value = re.sub(r"^(20\d{2}(届)?\s*)", "", value)
+        value = re.sub(r"\b(20\d{2})\b", "", value)
         value = re.sub(r"(校招|校园招聘|社招|实习生|实习|new grad|graduate|campus|internship|intern)", "", value, flags=re.IGNORECASE)
+        value = re.sub(r"(面向应届毕业生|应届毕业生|应届|毕业生|管培生)", "", value, flags=re.IGNORECASE)
         value = re.sub(r"\s+", " ", value).strip(" -_|")
         return value or (title or "").strip()
 
@@ -241,7 +280,7 @@ class JDAnalystAgent(BaseAgent):
             normalized = normalize_token(candidate)
             if not normalized:
                 continue
-            if normalized in self.NOISE_KEYWORDS:
+            if normalized in self.NOISE_KEYWORDS or self._is_noise_keyword(normalized):
                 continue
             if normalized.isdigit():
                 continue
@@ -251,9 +290,101 @@ class JDAnalystAgent(BaseAgent):
             if len(normalized) <= 1:
                 continue
             cleaned.append(candidate)
-        return unique_preserve_order(canonicalize_skills(cleaned))
+        canonical = unique_preserve_order(canonicalize_skills(cleaned))
+        filtered: List[str] = []
+        normalized_candidates = [normalize_token(item) for item in canonical]
+        for index, item in enumerate(canonical):
+            normalized = normalized_candidates[index]
+            if any(
+                normalized != other
+                and len(normalized) <= len(other)
+                and normalized in other.split()
+                for other in normalized_candidates
+            ):
+                continue
+            filtered.append(item)
+        return filtered
 
     def _clean_requirement_item(self, item: str) -> str:
         value = self._remove_label_prefix((item or "").strip()).strip("。;；:： ")
-        value = re.sub(r"^(熟悉|掌握|了解|具备|有|能够|擅长|善于)\s*", "", value)
+        value = re.sub(
+            r"^(熟悉|掌握|了解|具备|有|能够|擅长|善于|可以独立|能够独立|具有|有较强的|有良好的|具备较强的|具备良好的)\s*",
+            "",
+            value,
+        )
+        value = re.sub(r"(优先|经验者优先|加分)$", "", value).strip()
         return value.strip()
+
+    def _extract_section_lines(self, lines: List[str]) -> dict:
+        sections = {"responsibilities": [], "must_have": [], "nice_to_have": []}
+        current_section = ""
+        for line in lines:
+            stripped = line.strip()
+            if not stripped:
+                continue
+            detected = self._detect_section_heading(stripped)
+            inline_payload = self._remove_label_prefix(self._strip_bullet(stripped))
+            if detected and self._is_heading_only_line(stripped):
+                current_section = detected
+                continue
+            target_section = detected or current_section or self._infer_section_from_line(stripped)
+            if target_section == "responsibilities":
+                sections["responsibilities"].append(inline_payload)
+            elif target_section == "must_have":
+                sections["must_have"].extend(self._extract_requirement_items(inline_payload))
+            elif target_section == "nice_to_have":
+                sections["nice_to_have"].extend(self._extract_requirement_items(inline_payload))
+        return sections
+
+    def _detect_section_heading(self, line: str) -> str:
+        lowered = line.lower()
+        if any(label in lowered or label in line for label in self.RESPONSIBILITY_LABELS):
+            return "responsibilities"
+        if any(label in lowered or label in line for label in self.NICE_TO_HAVE_LABELS):
+            return "nice_to_have"
+        if any(label in lowered or label in line for label in self.MUST_HAVE_LABELS):
+            return "must_have"
+        return ""
+
+    def _infer_section_from_line(self, line: str) -> str:
+        if self._looks_like_nice_to_have(line):
+            return "nice_to_have"
+        if self._looks_like_must_have(line):
+            return "must_have"
+        if self._looks_like_responsibility(line):
+            return "responsibilities"
+        return ""
+
+    def _is_heading_only_line(self, line: str) -> bool:
+        stripped = self._strip_bullet(line)
+        payload = self._remove_label_prefix(stripped)
+        normalized = normalize_token(payload)
+        return not normalized or normalized in self.NOISE_KEYWORDS
+
+    def _split_requirement_phrase(self, phrase: str) -> List[str]:
+        value = (phrase or "").strip()
+        if not value:
+            return []
+        split_parts = re.split(r"\s*(?:和|及|以及|且)\s*", value)
+        return [part.strip() for part in split_parts if part.strip()]
+
+    def _is_requirement_item_worthy(self, item: str) -> bool:
+        normalized = normalize_token(item)
+        if not normalized or normalized in self.NOISE_KEYWORDS:
+            return False
+        if len(normalized) <= 1:
+            return False
+        if self._is_noise_keyword(normalized):
+            return False
+        return True
+
+    def _is_noise_keyword(self, normalized: str) -> bool:
+        if re.search(r"20\d{2}", normalized):
+            return True
+        if re.fullmatch(r"(校招|校园招聘|社招|实习|实习生|应届|毕业生|new grad|graduate|campus|internship|intern)", normalized):
+            return True
+        if normalized.endswith("职责") or normalized.endswith("要求"):
+            return True
+        if normalized in {"面向应届毕业生", "届别"}:
+            return True
+        return False

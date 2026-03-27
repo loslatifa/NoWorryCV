@@ -1,4 +1,5 @@
 from backend.app.agents.base import BaseAgent
+from backend.app.agents.base import _NO_FALLBACK
 from backend.app.schemas.jd import JDProfile
 from backend.app.services.llm.structured import StructuredLLMError
 from backend.app.schemas.review import ATSReport, ComplianceReport, CriticReport
@@ -18,8 +19,9 @@ class CriticAgent(BaseAgent):
         force_fallback: bool = False,
     ) -> CriticReport:
         fallback = self._run_fallback(draft, jd_profile, rewrite_strategy, compliance_report, ats_report)
-        if force_fallback or not self.llm_service.is_available:
-            return fallback
+        fallback_result = self.maybe_use_fallback(fallback, force_fallback=force_fallback)
+        if fallback_result is not _NO_FALLBACK:
+            return fallback_result
 
         try:
             critique = self.invoke_structured(
@@ -33,8 +35,8 @@ class CriticAgent(BaseAgent):
                 response_model=CriticReport,
             )
             return critique
-        except StructuredLLMError:
-            return fallback
+        except StructuredLLMError as exc:
+            return self.fallback_on_error(exc, fallback)
 
     def _run_fallback(
         self,
@@ -52,6 +54,18 @@ class CriticAgent(BaseAgent):
             major_issues += 1
             minor_issues.append("存在无法映射到原始事实的表述。")
             next_actions.append("移除无法追溯到 fact_cards 的句子。")
+        elif compliance_report.risk_level == "medium":
+            minor_issues.append("存在需要人工确认的表达风险，建议收紧 summary/headline 口吻。")
+            next_actions.append("移除夸张措辞、弱化过度资历表述，并检查关键词是否自然落位。")
+        if compliance_report.seniority_mismatches:
+            minor_issues.extend(compliance_report.seniority_mismatches[:2])
+            next_actions.append("将 summary/headline 调整为与真实资历相符的表达。")
+        if compliance_report.keyword_stuffing_warnings:
+            minor_issues.extend(compliance_report.keyword_stuffing_warnings[:2])
+            next_actions.append("减少关键词堆砌，优先用真实经历承载技能词。")
+        if compliance_report.exaggeration_warnings:
+            minor_issues.extend("检测到夸张表达：{0}".format(item) for item in compliance_report.exaggeration_warnings[:2])
+            next_actions.append("删除或改写夸张词，保留可验证的动作和结果。")
         if ats_report.score < 70:
             major_issues += 1
             minor_issues.append("ATS 分数偏低，结构或关键词覆盖仍需优化。")
@@ -89,6 +103,6 @@ class CriticAgent(BaseAgent):
 
         return CriticReport(
             major_issues=major_issues,
-            minor_issues=minor_issues[:8],
-            next_actions=next_actions[:5],
+            minor_issues=list(dict.fromkeys(minor_issues))[:8],
+            next_actions=list(dict.fromkeys(next_actions))[:5],
         )

@@ -1,4 +1,4 @@
-from typing import Callable, Dict, Optional
+from typing import Callable, Dict, List, Optional
 
 from langgraph.graph import END, StateGraph
 
@@ -7,25 +7,36 @@ from backend.app.agents.compliance import TruthfulnessComplianceAgent
 from backend.app.agents.critic import CriticAgent
 from backend.app.agents.gap_analysis import GapAnalysisAgent
 from backend.app.agents.jd_analyst import JDAnalystAgent
+from backend.app.agents.jd_review_card import JDReviewCardAgent
+from backend.app.agents.jd_review_doc import JDReviewDocAgent
+from backend.app.agents.interview_prep import InterviewPrepAgent
 from backend.app.agents.resume_parser import ResumeParserAgent
 from backend.app.agents.rewrite import ResumeRewriteAgent
 from backend.app.agents.strategy import StrategyAgent
-from backend.app.schemas.jd import JDProfile
+from backend.app.core.config import get_settings
+from backend.app.schemas.jd import JDProfile, KnowledgeReviewCard
+from backend.app.schemas.prep import JDReviewDocument
 from backend.app.schemas.review import ReviewBundle
 from backend.app.schemas.run_state import TailorRunInput, TailorRunResult, TailorRunState
 from backend.app.schemas.strategy import FinalResumePackage
 
 
 class ResumeTailorOrchestrator:
-    def __init__(self, progress_callback: Optional[Callable[[str, int, str], None]] = None) -> None:
+    def __init__(
+        self,
+        progress_callback: Optional[Callable[[str, int, str, Optional[List[KnowledgeReviewCard]]], None]] = None,
+    ) -> None:
         self.resume_parser = ResumeParserAgent()
         self.jd_analyst = JDAnalystAgent()
+        self.jd_review_card_agent = JDReviewCardAgent()
+        self.jd_review_doc_agent = JDReviewDocAgent()
         self.gap_analysis = GapAnalysisAgent()
         self.strategy_agent = StrategyAgent()
         self.rewrite_agent = ResumeRewriteAgent()
         self.compliance_agent = TruthfulnessComplianceAgent()
         self.ats_agent = ATSScoringAgent()
         self.critic_agent = CriticAgent()
+        self.interview_prep_agent = InterviewPrepAgent()
         self.progress_callback = progress_callback
         self.graph = self._build_graph()
 
@@ -38,14 +49,29 @@ class ResumeTailorOrchestrator:
         return profile
 
     def analyze_jd(self, payload: TailorRunInput) -> JDProfile:
-        return self.jd_analyst.run(payload.jd_text, force_fallback=self._prefer_fast_mode(payload))
+        jd_profile = self.jd_analyst.run(payload.jd_text, force_fallback=self._prefer_fast_mode(payload))
+        jd_profile.review_cards = self.jd_review_card_agent.run(
+            jd_profile,
+            payload.jd_text,
+            force_fallback=self._prefer_fast_mode(payload),
+        )
+        return jd_profile
+
+    def build_jd_review_doc(self, payload: TailorRunInput) -> JDReviewDocument:
+        jd_profile = self.analyze_jd(payload)
+        return self.jd_review_doc_agent.run(
+            jd_profile,
+            payload.jd_text,
+            jd_profile.review_cards,
+            force_fallback=self._prefer_fast_mode(payload),
+        )
 
     def run(self, payload: TailorRunInput, run_id: Optional[str] = None) -> TailorRunResult:
         generated_run_id = run_id
         if not generated_run_id:
             field = TailorRunState.model_fields["run_id"]
             generated_run_id = field.default_factory() if field.default_factory else ""
-        self._report_progress("queued", 3, "任务已创建，准备解析简历。")
+        self._report_progress("queued", 3, "任务已创建，准备优先分析 JD。")
         initial_state = TailorRunState(
             run_id=generated_run_id,
             input=payload,
@@ -61,8 +87,10 @@ class ResumeTailorOrchestrator:
 
     def _build_graph(self):
         graph = StateGraph(dict)
-        graph.add_node("parse_resume", self._parse_resume_node)
         graph.add_node("analyze_jd", self._analyze_jd_node)
+        graph.add_node("review_cards", self._review_cards_node)
+        graph.add_node("jd_review_doc", self._jd_review_doc_node)
+        graph.add_node("parse_resume", self._parse_resume_node)
         graph.add_node("gap_analysis", self._gap_analysis_node)
         graph.add_node("strategy", self._strategy_node)
         graph.add_node("rewrite", self._rewrite_node)
@@ -70,9 +98,11 @@ class ResumeTailorOrchestrator:
         graph.add_node("refine_strategy", self._refine_strategy_node)
         graph.add_node("finalize", self._finalize_node)
 
-        graph.set_entry_point("parse_resume")
-        graph.add_edge("parse_resume", "analyze_jd")
-        graph.add_edge("analyze_jd", "gap_analysis")
+        graph.set_entry_point("analyze_jd")
+        graph.add_edge("analyze_jd", "review_cards")
+        graph.add_edge("review_cards", "jd_review_doc")
+        graph.add_edge("jd_review_doc", "parse_resume")
+        graph.add_edge("parse_resume", "gap_analysis")
         graph.add_edge("gap_analysis", "strategy")
         graph.add_edge("strategy", "rewrite")
         graph.add_edge("rewrite", "review")
@@ -87,29 +117,6 @@ class ResumeTailorOrchestrator:
         graph.add_edge("refine_strategy", "rewrite")
         graph.add_edge("finalize", END)
         return graph.compile()
-
-    def _parse_resume_node(self, raw_state: Dict) -> Dict:
-        state = TailorRunState.model_validate(raw_state)
-        candidate_profile, fact_cards = self.resume_parser.run(
-            state.input.resume_text,
-            state.input.candidate_notes,
-            force_fallback=self._prefer_fast_mode(state.input),
-        )
-        state.candidate_profile = candidate_profile
-        state.fact_cards = fact_cards
-        if state.resolved_language == "auto":
-            state.resolved_language = candidate_profile.basics.language or "en"
-        state.execution_log.append(
-            self.resume_parser.record(
-                "Parsed resume into candidate profile and fact cards.",
-                {
-                    "fact_count": str(len(fact_cards)),
-                    "provider": self.resume_parser.llm_service.provider_name,
-                },
-            )
-        )
-        self._report_progress("parse_resume", 20, "已完成简历解析，正在分析 JD。")
-        return state.model_dump(mode="json")
 
     def _analyze_jd_node(self, raw_state: Dict) -> Dict:
         state = TailorRunState.model_validate(raw_state)
@@ -131,7 +138,75 @@ class ResumeTailorOrchestrator:
                 },
             )
         )
-        self._report_progress("analyze_jd", 35, "JD 已结构化，正在判断重点与招聘类型。")
+        self._report_progress("analyze_jd", 18, "JD 已结构化，正在生成复习看板。")
+        return state.model_dump(mode="json")
+
+    def _review_cards_node(self, raw_state: Dict) -> Dict:
+        state = TailorRunState.model_validate(raw_state)
+        review_cards = self.jd_review_card_agent.run(
+            state.jd_profile,
+            state.input.jd_text,
+            force_fallback=self._prefer_fast_mode(state.input),
+        )
+        state.jd_profile.review_cards = review_cards
+        state.execution_log.append(
+            self.jd_review_card_agent.record(
+                "Generated JD review cards.",
+                {
+                    "card_count": str(len(review_cards)),
+                    "provider": self.jd_review_card_agent.llm_service.provider_name,
+                },
+            )
+        )
+        self._report_progress(
+            "review_cards",
+            30,
+            "JD 重点已提炼，等待时可以先复习这些知识点。",
+            review_cards=review_cards,
+        )
+        return state.model_dump(mode="json")
+
+    def _jd_review_doc_node(self, raw_state: Dict) -> Dict:
+        state = TailorRunState.model_validate(raw_state)
+        state.jd_review_doc = self.jd_review_doc_agent.run(
+            state.jd_profile,
+            state.input.jd_text,
+            state.jd_profile.review_cards,
+            force_fallback=self._prefer_fast_mode(state.input),
+        )
+        state.execution_log.append(
+            self.jd_review_doc_agent.record(
+                "Generated JD review document.",
+                {
+                    "topic_count": str(len(state.jd_review_doc.key_topics)),
+                    "provider": self.jd_review_doc_agent.llm_service.provider_name,
+                },
+            )
+        )
+        self._report_progress("jd_review_doc", 36, "JD 复习文档已整理，正在解析简历。")
+        return state.model_dump(mode="json")
+
+    def _parse_resume_node(self, raw_state: Dict) -> Dict:
+        state = TailorRunState.model_validate(raw_state)
+        candidate_profile, fact_cards = self.resume_parser.run(
+            state.input.resume_text,
+            state.input.candidate_notes,
+            force_fallback=self._prefer_fast_mode(state.input),
+        )
+        state.candidate_profile = candidate_profile
+        state.fact_cards = fact_cards
+        if state.resolved_language == "auto":
+            state.resolved_language = candidate_profile.basics.language or "en"
+        state.execution_log.append(
+            self.resume_parser.record(
+                "Parsed resume into candidate profile and fact cards.",
+                {
+                    "fact_count": str(len(fact_cards)),
+                    "provider": self.resume_parser.llm_service.provider_name,
+                },
+            )
+        )
+        self._report_progress("parse_resume", 44, "已完成简历解析，正在匹配经历与 JD。")
         return state.model_dump(mode="json")
 
     def _gap_analysis_node(self, raw_state: Dict) -> Dict:
@@ -148,7 +223,7 @@ class ResumeTailorOrchestrator:
                 {"fit_score": str(state.gap_analysis.fit_score_initial)},
             )
         )
-        self._report_progress("gap_analysis", 50, "已完成匹配分析，正在制定改写策略。")
+        self._report_progress("gap_analysis", 58, "已完成匹配分析，正在制定改写策略。")
         return state.model_dump(mode="json")
 
     def _strategy_node(self, raw_state: Dict) -> Dict:
@@ -167,7 +242,7 @@ class ResumeTailorOrchestrator:
                 {"provider": self.strategy_agent.llm_service.provider_name},
             )
         )
-        self._report_progress("strategy", 65, "改写策略已生成，正在撰写定制简历。")
+        self._report_progress("strategy", 70, "改写策略已生成，正在撰写定制简历。")
         return state.model_dump(mode="json")
 
     def _rewrite_node(self, raw_state: Dict) -> Dict:
@@ -193,7 +268,7 @@ class ResumeTailorOrchestrator:
         )
         self._report_progress(
             "rewrite",
-            min(85, 68 + state.current_iteration * 7),
+            min(85, 74 + state.current_iteration * 5),
             "已生成第 {0} 版草稿，正在审查真实性与 ATS。".format(state.current_iteration),
         )
         return state.model_dump(mode="json")
@@ -232,7 +307,7 @@ class ResumeTailorOrchestrator:
         )
         self._report_progress(
             "review",
-            min(94, 82 + state.current_iteration * 4),
+            min(94, 84 + state.current_iteration * 4),
             "已完成第 {0} 轮审查，正在判断是否继续优化。".format(state.current_iteration),
         )
         return state.model_dump(mode="json")
@@ -253,16 +328,34 @@ class ResumeTailorOrchestrator:
         )
         self._report_progress(
             "refine_strategy",
-            min(88, 70 + state.current_iteration * 6),
+            min(88, 76 + state.current_iteration * 5),
             "正在根据审查结果微调策略，准备下一轮改写。",
         )
         return state.model_dump(mode="json")
 
     def _finalize_node(self, raw_state: Dict) -> Dict:
         state = TailorRunState.model_validate(raw_state)
+        if state.jd_review_doc is None:
+            state.jd_review_doc = self.jd_review_doc_agent.run(
+                state.jd_profile,
+                state.input.jd_text,
+                state.jd_profile.review_cards,
+                force_fallback=self._prefer_fast_mode(state.input),
+            )
+        state.interview_prep_doc = self.interview_prep_agent.run(
+            state.candidate_profile,
+            state.fact_cards,
+            state.jd_profile,
+            state.gap_analysis,
+            state.rewrite_strategy,
+            state.drafts[-1],
+            state.reviews[-1],
+            state.resolved_language,
+            force_fallback=self._prefer_fast_mode(state.input),
+        )
         state.stop_reason = self._derive_stop_reason(state)
         state.final_package = self._build_final_package(state, state.resolved_language)
-        self._report_progress("finalize", 99, "正在整理最终结果与修改说明。")
+        self._report_progress("finalize", 99, "正在整理最终结果、JD 复习文档和面试准备文档。")
         return state.model_dump(mode="json")
 
     def _route_after_review(self, raw_state: Dict) -> str:
@@ -323,6 +416,8 @@ class ResumeTailorOrchestrator:
             change_log=change_log,
             fit_summary=fit_summary,
             risk_notes=risk_notes,
+            jd_review_doc=state.jd_review_doc,
+            interview_prep_doc=state.interview_prep_doc,
         )
 
     def _build_result(self, state: TailorRunState) -> TailorRunResult:
@@ -361,11 +456,17 @@ class ResumeTailorOrchestrator:
         return ""
 
     def _prefer_fast_mode(self, payload: TailorRunInput) -> bool:
-        return payload.processing_mode == "fast"
+        return (not get_settings().llm_strict_mode) and payload.processing_mode == "fast"
 
-    def _report_progress(self, stage: str, percent: int, message: str) -> None:
+    def _report_progress(
+        self,
+        stage: str,
+        percent: int,
+        message: str,
+        review_cards: Optional[List[KnowledgeReviewCard]] = None,
+    ) -> None:
         if self.progress_callback:
-            self.progress_callback(stage, percent, message)
+            self.progress_callback(stage, percent, message, review_cards)
 
     def _humanize_hiring_track(self, hiring_track: str) -> str:
         mapping = {

@@ -1,6 +1,7 @@
 from typing import List
 
 from backend.app.agents.base import BaseAgent
+from backend.app.agents.base import _NO_FALLBACK
 from backend.app.services.llm.structured import StructuredLLMError
 from backend.app.schemas.candidate import CandidateProfile
 from backend.app.schemas.common import FactCard
@@ -20,8 +21,9 @@ class GapAnalysisAgent(BaseAgent):
         force_fallback: bool = False,
     ) -> GapAnalysis:
         fallback = self._run_fallback(candidate, fact_cards, jd_profile)
-        if force_fallback or not self.llm_service.is_available:
-            return fallback
+        fallback_result = self.maybe_use_fallback(fallback, force_fallback=force_fallback)
+        if fallback_result is not _NO_FALLBACK:
+            return fallback_result
 
         try:
             analysis = self.invoke_structured(
@@ -33,8 +35,8 @@ class GapAnalysisAgent(BaseAgent):
                 response_model=GapAnalysis,
             )
             return self._normalize_gap_analysis(analysis, fallback)
-        except StructuredLLMError:
-            return fallback
+        except StructuredLLMError as exc:
+            return self.fallback_on_error(exc, fallback)
 
     def _run_fallback(self, candidate: CandidateProfile, fact_cards: List[FactCard], jd_profile: JDProfile) -> GapAnalysis:
         candidate_tokens = self._collect_candidate_tokens(candidate, fact_cards)

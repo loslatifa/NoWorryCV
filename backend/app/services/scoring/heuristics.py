@@ -24,8 +24,13 @@ SKILL_CANONICAL_MAP = {
     "azure": "Azure",
     "git": "Git",
     "ab testing": "A/B Testing",
+    "a b testing": "A/B Testing",
+    "ab test": "A/B Testing",
+    "a b test": "A/B Testing",
     "a/b testing": "A/B Testing",
     "user research": "User Research",
+    "experiment design": "实验设计",
+    "stakeholder communication": "跨团队协作",
     "roadmap": "Roadmap",
     "growth": "增长",
     "seo": "SEO",
@@ -38,17 +43,25 @@ SKILL_CANONICAL_MAP = {
     "etl": "ETL",
     "machine learning": "Machine Learning",
     "data analysis": "数据分析",
+    "data analysis ability": "数据分析",
     "product management": "产品管理",
     "stakeholder management": "跨团队协作",
+    "cross functional collaboration": "跨团队协作",
     "figma": "Figma",
     "spark": "Spark",
     "hadoop": "Hadoop",
     "运营": "运营",
     "增长": "增长",
     "数据分析": "数据分析",
+    "数据分析能力": "数据分析",
     "用户研究": "用户研究",
+    "用户研究能力": "用户研究",
     "产品规划": "产品规划",
     "跨团队协作": "跨团队协作",
+    "跨部门协作": "跨团队协作",
+    "跨部门沟通": "跨团队协作",
+    "实验设计": "实验设计",
+    "沟通能力": "沟通能力",
     "项目管理": "项目管理",
     "简历优化": "简历优化",
 }
@@ -92,7 +105,10 @@ def extract_known_skills(text: str) -> List[str]:
 
 
 def split_inline_items(text: str) -> List[str]:
-    return [item.strip() for item in re.split(r"[，,、;；|]+", text or "") if item.strip()]
+    normalized = (text or "").strip()
+    normalized = re.sub(r"\s+(and|or)\s+", "、", normalized, flags=re.IGNORECASE)
+    normalized = normalized.replace("以及", "、")
+    return [item.strip() for item in re.split(r"[，,、;；|]+", normalized) if item.strip()]
 
 
 def extract_tokens(text: str) -> List[str]:

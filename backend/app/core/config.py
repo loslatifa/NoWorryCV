@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     llm_timeout_seconds: float = 45.0
     llm_max_retries: int = 2
     llm_response_format: str = "json_object"
+    llm_strict_mode: bool = True
     qwen_api_key: str = Field(
         default="",
         validation_alias=AliasChoices("QWEN_API_KEY", "DASHSCOPE_API_KEY"),

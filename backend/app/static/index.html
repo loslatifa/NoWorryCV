@@ -108,8 +108,8 @@
             </div>
 
             <div class="progress-steps" id="progress-steps">
-              <span class="progress-step active">解析简历</span>
-              <span class="progress-step">分析 JD</span>
+              <span class="progress-step active">分析 JD</span>
+              <span class="progress-step">提炼看板</span>
               <span class="progress-step">匹配经历</span>
               <span class="progress-step">生成草稿</span>
               <span class="progress-step">质量审查</span>
@@ -148,7 +148,7 @@
           </div>
 
           <div id="result-placeholder" class="result-placeholder">
-            <p>结果区域会展示 ATS 分数、风险等级、匹配摘要和生成后的 Markdown 简历。</p>
+            <p>结果区域会展示 ATS 分数、风险等级、匹配摘要、定制简历，以及 JD 复习文档和面试准备文档。</p>
           </div>
 
           <div id="result-root" class="result-root hidden">
@@ -184,6 +184,18 @@
               <section class="subpanel">
                 <h3>定制简历 Markdown</h3>
                 <pre id="resume-markdown" class="markdown-output"></pre>
+              </section>
+            </div>
+
+            <div class="result-columns">
+              <section class="subpanel">
+                <h3>JD 复习文档</h3>
+                <pre id="jd-review-doc" class="markdown-output"></pre>
+              </section>
+
+              <section class="subpanel">
+                <h3>面试准备文档</h3>
+                <pre id="interview-prep-doc" class="markdown-output"></pre>
               </section>
             </div>
           </div>

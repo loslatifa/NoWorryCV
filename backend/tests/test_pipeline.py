@@ -36,3 +36,7 @@ def test_tailor_pipeline_generates_reviewed_resume() -> None:
     assert "工作经历" in result.final_package.draft.markdown
     assert result.reviews
     assert "当前以" not in result.final_package.draft.summary
+    assert result.final_package.jd_review_doc is not None
+    assert result.final_package.jd_review_doc.markdown
+    assert result.final_package.interview_prep_doc is not None
+    assert result.final_package.interview_prep_doc.markdown
