@@ -1,163 +1,129 @@
 # NoWorryCV
 
-NoWorryCV 是一个基于 Python 的 JD 定制简历系统。它会把“原始简历 + 目标 JD”转成一份更贴合岗位、但仍然真实可追溯的简历版本，并返回匹配分析、修改说明、风险提示和等待中的 JD 知识点复习卡片。
+NoWorryCV 是一个针对求职场景设计的简历定制工具。  
+你上传一份基础简历，再粘贴目标岗位 JD，系统会生成一份更贴合该岗位的简历版本，同时给出匹配分析、修改说明、风险提示，以及等待时可查看的 JD 知识点复习卡片。
 
-## Features
+## 这个工具能做什么
 
-- 支持上传 `PDF / DOCX / Markdown / TXT` 简历
-- 支持输入目标 JD 和候选人补充备注
-- 识别 `校招 / 社招 / 实习` 招聘类型
-- 输出结构化 `candidate_profile`、`jd_profile`、`gap_analysis`、`rewrite_strategy`
-- 生成 ATS 友好的 Markdown 简历
-- 执行真实性审查、ATS 评分和 critic 迭代优化
-- 前端展示真实任务进度
-- 等待期间根据 JD 生成可手动切换的知识点复习卡片
+- 根据不同 JD 生成定制版简历
+- 尽量突出和岗位更相关的真实经历、项目和技能
+- 区分 `校招 / 社招 / 实习` 三类招聘场景
+- 输出 ATS 友好的 Markdown 简历
+- 给出匹配摘要、修改说明和风险提示
+- 在等待过程中展示与当前 JD 相关的复习卡片，支持手动切换上下一个知识点
 
-## Tech Stack
+## 使用前准备
 
-- Backend: `FastAPI`
-- Agent orchestration: `LangGraph`
-- Schema validation: `Pydantic`
-- LLM provider: `Qwen / OpenAI-compatible / stub fallback`
-- Frontend: 内置静态页面，由 FastAPI 托管
+1. 准备一份基础简历
+支持格式：
+- `PDF`
+- `DOCX`
+- `Markdown`
+- `TXT`
 
-## Quick Start
+2. 准备目标 JD
+- 建议尽量粘贴完整 JD
+- 最好包含岗位职责、任职要求、加分项
+
+3. 配置模型密钥
+- 把 `.env.example` 复制为 `.env`
+- 在 `.env` 中填入你自己的模型 key
+
+```bash
+cp .env.example .env
+```
+
+## 如何启动
+
+先安装依赖并启动服务：
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
 pip install ".[dev]"
-cp .env.example .env
-```
-
-编辑 `.env`，填入你自己的 key，然后启动服务：
-
-```bash
 PYTHONPATH=. uvicorn backend.app.main:app --reload
 ```
 
-打开：
+启动后打开：
 
 ```text
 http://127.0.0.1:8000/app/
 ```
 
-## Environment Variables
+## 如何使用
 
-默认使用 `stub` provider，不依赖真实模型也能跑通最小闭环：
+1. 上传简历文件
+- 推荐上传可复制文字的 PDF 或标准 DOCX
 
-```env
-LLM_PROVIDER=stub
-PROMPT_VERSION=v1
-```
+2. 粘贴目标 JD
+- JD 越完整，结果通常越稳定
 
-如果要接 Qwen：
+3. 填写候选人备注
+- 比如“希望强调数据分析”“希望偏增长产品方向”
 
-```env
-LLM_PROVIDER=qwen
-QWEN_API_KEY=your_qwen_api_key
-QWEN_MODEL=qwen-plus
-QWEN_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
-```
+4. 选择输出语言和自动迭代轮数
+- 如果不确定，语言可以选“自动跟随 JD”
+- 迭代轮数越多，系统会多做几轮优化，但等待时间也会更长
 
-也兼容 DashScope 常见命名：
+5. 点击“生成定制简历”
+- 页面会显示真实进度
+- 等待时会出现当前 JD 的知识点复习卡片
+- 你可以手动切换到上一个或下一个知识点
 
-```env
-DASHSCOPE_API_KEY=your_qwen_api_key
-QWEN_MODEL=qwen-plus
-QWEN_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
-```
+## 结果页怎么看
 
-可选项：
+结果页主要看这几块：
 
-```env
-LLM_RESPONSE_FORMAT=json_object
-LLM_TIMEOUT_SECONDS=45
-LLM_MAX_RETRIES=2
-```
+- `ATS 分数`
+用来辅助判断这份简历和 JD 的关键词、结构匹配情况。
 
-## Main Endpoints
+- `真实性风险`
+提示是否有可能存在无法追溯或表达过度的问题。
 
-- `GET /health`
-- `POST /api/v1/resume/parse`
-- `POST /api/v1/jd/analyze`
-- `POST /api/v1/tailor-runs`
-- `POST /api/v1/tailor-runs/upload`
-- `POST /api/v1/tailor-runs/upload-jobs`
-- `GET /api/v1/tailor-runs/{run_id}/status`
+- `招聘类型`
+系统会尝试识别这是校招、社招还是实习岗位。
 
-网页端使用的是 `upload-jobs -> status` 的异步模式。
+- `匹配摘要`
+简要说明这份简历为什么和当前 JD 匹配，或者主要差距在哪。
 
-## Local Testing
+- `修改说明`
+告诉你系统重点改了哪些方向。
 
-运行后端测试：
+- `风险提示`
+提醒你哪些地方还需要人工确认。
 
-```bash
-PYTHONPATH=. pytest backend/tests -q
-```
+- `定制简历 Markdown`
+这是最终生成的简历正文。
 
-验证 Qwen 连通性：
+## 使用建议
 
-```bash
-source .venv/bin/activate
-PYTHONPATH=. python scripts/check_qwen.py
-```
+- 一次只针对一个 JD 生成，不要把多个岗位要求混在一起
+- 如果你的简历本身信息很少，先补充项目、实习、技能，再生成效果会更好
+- 如果结果不够理想，可以调整候选人备注再跑一轮
+- 校招岗位尽量保证教育、项目、实习信息完整
+- 社招岗位尽量补充职责范围、业务结果和量化成果
 
-检查公开仓库文件里是否包含疑似密钥：
+## 注意事项
+
+- 系统目标是“优化表达和重排信息”，不是替你编造经历
+- 如果原始简历缺少某项经历，系统不应该凭空补出来
+- PDF / DOCX 的解析效果依赖原始文件质量，扫描件或排版过于复杂的文件效果会差一些
+
+## 隐私与安全
+
+- 真实 key 只应该放在本地 `.env`
+- 不要把 `.env` 上传到 GitHub
+- 仓库里保留的 `.env.example` 只是模板，不应填写真实密钥
+
+如果你准备上传 GitHub，建议先运行：
 
 ```bash
 PYTHONPATH=. python scripts/check_public_secrets.py
 ```
 
-## GitHub Upload Safety
+## 当前限制
 
-这个项目已经忽略了常见本地密钥文件：
-
-- `.env`
-- `.env.*`
-- `!.env.example`
-- `*.pem`
-- `*.key`
-- `*.p12`
-- `*.pfx`
-- `*.crt`
-
-上传前请确认：
-
-1. 只提交 `.env.example`，不要提交 `.env`
-2. 不要把真实 key 写进 `README.md`、`.env.example`、`docs/` 或脚本
-3. 先运行一次 `python scripts/check_public_secrets.py`
-4. 如果你用的是 GitHub 网页手动上传，不要把 `.env` 文件选进去
-
-## Project Structure
-
-```text
-backend/
-  app/
-    agents/
-    api/
-    core/
-    graph/
-    schemas/
-    services/
-    static/
-  tests/
-docs/
-prompts/
-scripts/
-```
-
-## Docs
-
-- [Resume Quality Improvement Prompt](docs/resume_quality_improvement_prompt.md)
-
-## Current Limitations
-
-- 当前仍以 MVP 为主，数据库持久化尚未接入
-- PDF / DOCX 解析依赖文本质量，扫描件效果有限
-- 结果质量仍然高度依赖原始简历质量和 JD 完整度
-
-## License
-
-如需公开仓库，请按你的实际使用场景补充许可证。
+- 当前仍是 MVP，结果质量依赖原始简历质量和 JD 完整度
+- 某些复杂 PDF / DOCX 解析可能不稳定
+- 极短 JD 或极短简历会明显影响结果质量
