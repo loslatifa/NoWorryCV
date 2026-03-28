@@ -1,5 +1,7 @@
 from functools import lru_cache
+import time
 from typing import Any, Dict, Optional, Protocol
+from urllib.parse import urlparse
 
 import httpx
 
@@ -81,16 +83,26 @@ class OpenAICompatibleProvider:
             "Content-Type": "application/json",
         }
 
-        with httpx.Client(timeout=self.timeout_seconds) as client:
-            response = client.post(
-                "{0}/chat/completions".format(self.base_url),
-                headers=headers,
-                json=payload,
-            )
-            response.raise_for_status()
-            data = response.json()
+        connect_retries = max(1, int(metadata.get("connect_retries", 3)))
+        last_error: Optional[httpx.ConnectError] = None
+        for attempt in range(1, connect_retries + 1):
+            try:
+                with httpx.Client(timeout=self.timeout_seconds) as client:
+                    response = client.post(
+                        "{0}/chat/completions".format(self.base_url),
+                        headers=headers,
+                        json=payload,
+                    )
+                    response.raise_for_status()
+                    data = response.json()
+                return self._extract_content(data)
+            except httpx.ConnectError as exc:
+                last_error = exc
+                if attempt >= connect_retries:
+                    raise RuntimeError(self._format_connect_error(exc)) from exc
+                time.sleep(min(1.5, 0.4 * attempt))
 
-        return self._extract_content(data)
+        raise RuntimeError(self._format_connect_error(last_error or RuntimeError("Unknown connection error")))
 
     def _extract_content(self, payload: Dict[str, Any]) -> str:
         choices = payload.get("choices") or []
@@ -107,6 +119,14 @@ class OpenAICompatibleProvider:
                     parts.append(item.get("text", ""))
             return "".join(parts)
         raise RuntimeError("Unsupported provider response content format.")
+
+    def _format_connect_error(self, exc: Exception) -> str:
+        host = urlparse(self.base_url).hostname or self.base_url
+        return (
+            "Failed to connect to LLM provider host '{0}'. "
+            "This usually means DNS resolution or outbound network access is unavailable. "
+            "Original error: {1}"
+        ).format(host, exc)
 
 
 def build_llm_provider(settings: Optional[Settings] = None) -> LLMProvider:

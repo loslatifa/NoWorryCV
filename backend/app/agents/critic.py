@@ -8,6 +8,7 @@ from backend.app.schemas.strategy import ResumeDraft, RewriteStrategy
 
 class CriticAgent(BaseAgent):
     name = "critic"
+    JD_META_MARKERS = ("JD", "岗位要求", "任职要求", "加分项", "对应要求", "岗位需求", "对应 JD", "匹配 JD", "符合 JD")
 
     def run(
         self,
@@ -75,6 +76,13 @@ class CriticAgent(BaseAgent):
             next_actions.append("只在有真实依据时补充或重排相关关键词。")
         minor_issues.extend(ats_report.format_warnings)
 
+        jd_meta_bullets = self._find_jd_meta_bullets(draft)
+        if jd_meta_bullets:
+            major_issues += 1
+            minor_issues.append("部分 bullet 把 JD 要求当作注释拼进了简历正文，语言不自然。")
+            minor_issues.extend("检测到 JD 注释式 bullet：{0}".format(item) for item in jd_meta_bullets[:2])
+            next_actions.append("移除 bullet 中的 JD/岗位要求说明，只保留真实经历的动作、场景、方法和结果。")
+
         track = jd_profile.hiring_track
         if track == "campus":
             if not draft.education_section:
@@ -106,3 +114,14 @@ class CriticAgent(BaseAgent):
             minor_issues=list(dict.fromkeys(minor_issues))[:8],
             next_actions=list(dict.fromkeys(next_actions))[:5],
         )
+
+    def _find_jd_meta_bullets(self, draft: ResumeDraft):
+        flagged = []
+        for section in draft.experience_section + draft.project_section:
+            for bullet in section.bullets:
+                if any(marker in bullet for marker in self.JD_META_MARKERS):
+                    flagged.append(bullet)
+                    continue
+                if ("对应" in bullet or "匹配" in bullet or "符合" in bullet) and ("岗位" in bullet or "要求" in bullet):
+                    flagged.append(bullet)
+        return flagged

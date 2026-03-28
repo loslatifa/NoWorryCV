@@ -1,5 +1,8 @@
+import httpx
+
 from backend.app.core.config import get_settings
-from backend.app.services.llm.provider import get_llm_provider
+from backend.app.services.llm import provider as provider_module
+from backend.app.services.llm.provider import OpenAICompatibleProvider, get_llm_provider
 
 
 def test_provider_falls_back_to_stub_when_credentials_missing(monkeypatch) -> None:
@@ -41,3 +44,80 @@ def test_qwen_provider_accepts_official_dashscope_api_key_env(monkeypatch) -> No
     assert settings.qwen_api_key == "test-dashscope-key"
     assert provider.name == "openai_compatible"
     assert provider.is_available is True
+
+
+def test_openai_compatible_provider_retries_connect_errors(monkeypatch) -> None:
+    attempts = {"count": 0}
+
+    class FakeResponse:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self):
+            return {"choices": [{"message": {"content": '{"status":"ok"}'}}]}
+
+    class FakeClient:
+        def __init__(self, timeout=None) -> None:
+            self.timeout = timeout
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def post(self, url, headers=None, json=None):
+            del url, headers, json
+            attempts["count"] += 1
+            if attempts["count"] < 3:
+                raise httpx.ConnectError("temporary dns failure")
+            return FakeResponse()
+
+    monkeypatch.setattr(provider_module.httpx, "Client", FakeClient)
+    monkeypatch.setattr(provider_module.time, "sleep", lambda _: None)
+
+    provider = OpenAICompatibleProvider(
+        api_key="test-key",
+        model="qwen-plus",
+        base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+    )
+
+    result = provider.complete("Return JSON.", '{"status":"ok"}', metadata={"expect_json": True})
+
+    assert result == '{"status":"ok"}'
+    assert attempts["count"] == 3
+
+
+def test_openai_compatible_provider_surfaces_dns_message_after_retries(monkeypatch) -> None:
+    class FakeClient:
+        def __init__(self, timeout=None) -> None:
+            self.timeout = timeout
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def post(self, url, headers=None, json=None):
+            del url, headers, json
+            raise httpx.ConnectError("[Errno 8] nodename nor servname provided, or not known")
+
+    monkeypatch.setattr(provider_module.httpx, "Client", FakeClient)
+    monkeypatch.setattr(provider_module.time, "sleep", lambda _: None)
+
+    provider = OpenAICompatibleProvider(
+        api_key="test-key",
+        model="qwen-plus",
+        base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+    )
+
+    try:
+        provider.complete("Return JSON.", '{"status":"ok"}', metadata={"expect_json": True, "connect_retries": 2})
+    except RuntimeError as exc:
+        message = str(exc)
+    else:  # pragma: no cover
+        raise AssertionError("Expected provider.complete to raise RuntimeError")
+
+    assert "dashscope.aliyuncs.com" in message
+    assert "DNS resolution" in message

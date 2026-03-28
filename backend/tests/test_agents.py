@@ -4,6 +4,7 @@ from backend.app.agents.resume_parser import ResumeParserAgent
 from backend.app.agents.rewrite import ResumeRewriteAgent
 from backend.app.agents.strategy import StrategyAgent
 from backend.app.agents.compliance import TruthfulnessComplianceAgent
+from backend.app.agents.critic import CriticAgent
 from backend.app.agents.jd_review_card import JDReviewCardAgent
 from backend.app.agents.jd_review_doc import JDReviewDocAgent
 from backend.app.agents.interview_prep import InterviewPrepAgent
@@ -71,6 +72,50 @@ class PartialRewriteProvider:
                 ],
                 "project_section": [],
                 "education_section": [],
+            },
+            ensure_ascii=False,
+        )
+
+
+class JDTailRewriteProvider:
+    name = "fake"
+
+    @property
+    def is_available(self) -> bool:
+        return True
+
+    def complete(self, system_prompt: str, user_prompt: str, metadata=None) -> str:
+        del system_prompt, user_prompt, metadata
+        return json.dumps(
+            {
+                "headline": "张三 | 面向 增长产品经理 的定制简历",
+                "summary": "具备 SQL、A/B Testing 和增长分析相关经验，曾推动转化率提升。",
+                "skills_section": ["SQL", "A/B Testing"],
+                "experience_section": [
+                    {
+                        "heading": "产品经理",
+                        "subheading": "A公司",
+                        "bullets": [
+                            {
+                                "text": "推动 A/B 测试与漏斗优化，提升转化率 12% - 对应 JD 的数据分析要求",
+                                "fact_ids": ["fact_1"],
+                            }
+                        ],
+                    }
+                ],
+                "project_section": [
+                    {
+                        "heading": "增长实验项目",
+                        "subheading": "项目负责人",
+                        "bullets": [
+                            {
+                                "text": "使用 SQL 复盘实验结果（符合岗位要求）",
+                                "fact_ids": ["fact_5"],
+                            }
+                        ],
+                    }
+                ],
+                "education_section": ["某大学 | 本科 | 信息管理"],
             },
             ensure_ascii=False,
         )
@@ -449,6 +494,65 @@ def test_rewrite_agent_uses_fallback_when_llm_output_is_incomplete() -> None:
     assert "B公司" in draft.markdown
 
 
+def test_rewrite_agent_strips_jd_requirement_tails_from_bullets() -> None:
+    llm_service = StructuredLLMService(
+        provider=JDTailRewriteProvider(),
+        prompt_loader=PromptLoader(default_version="v1"),
+        max_retries=1,
+    )
+    agent = ResumeRewriteAgent(llm_service=llm_service)
+    candidate = CandidateProfile(
+        basics=CandidateBasics(name="张三", language="zh"),
+        work_experiences=[
+            {
+                "id": "exp_1",
+                "company": "A公司",
+                "title": "产品经理",
+                "bullets": ["推动 A/B 测试与漏斗优化，提升转化率 12%"],
+                "achievements": ["推动 A/B 测试与漏斗优化，提升转化率 12%"],
+            }
+        ],
+        projects=[ProjectExperience(id="proj_1", name="增长实验项目", role="项目负责人", bullets=["使用 SQL 复盘实验结果"], skills_used=["SQL"])],
+        education=[EducationEntry(id="edu_1", school="某大学", degree="本科", field_of_study="信息管理")],
+        skills=SkillSet(hard_skills=["SQL", "A/B Testing"]),
+    )
+    fact_cards = [
+        FactCard(id="fact_1", category="work_bullet", text="推动 A/B 测试与漏斗优化，提升转化率 12%", source_span="work_experiences.exp_1.bullets.1"),
+        FactCard(id="fact_5", category="project_bullet", text="使用 SQL 复盘实验结果", source_span="projects.proj_1.bullets.1"),
+        FactCard(id="fact_6", category="skill", text="SQL", source_span="skills"),
+        FactCard(id="fact_7", category="skill", text="A/B Testing", source_span="skills"),
+    ]
+    jd_profile = JDProfile(
+        job_title="增长产品经理",
+        department="product",
+        hiring_track="experienced",
+        must_have_skills=["SQL", "A/B Testing"],
+        keywords=["SQL", "A/B Testing", "增长"],
+        language="zh",
+    )
+    gap_analysis = GapAnalysis(
+        fit_score_initial=78,
+        strengths=["SQL", "A/B Testing", "增长"],
+        missing_keywords=[],
+        recommended_focus=["SQL", "A/B Testing", "增长"],
+    )
+    strategy = RewriteStrategy(
+        audience_hint="experienced",
+        section_priority=["summary", "skills", "experience", "projects", "education"],
+        max_experiences=4,
+        max_bullets_per_experience=4,
+        max_skills=12,
+        include_projects=True,
+    )
+
+    draft = agent.run(candidate, fact_cards, jd_profile, gap_analysis, strategy, "zh")
+
+    assert "JD" not in draft.experience_section[0].bullets[0]
+    assert "岗位要求" not in draft.project_section[0].bullets[0]
+    assert "对应" not in draft.markdown
+    assert "符合岗位要求" not in draft.markdown
+
+
 def test_rewrite_fallback_prefers_action_and_result_bullets_and_non_meta_summary() -> None:
     agent = ResumeRewriteAgent()
     candidate = CandidateProfile(
@@ -533,6 +637,32 @@ def test_compliance_agent_reports_medium_risk_for_seniority_and_keyword_stuffing
 
     assert report.risk_level == "medium"
     assert report.seniority_mismatches
+
+
+def test_critic_agent_flags_jd_annotation_style_bullets() -> None:
+    agent = CriticAgent()
+    draft = ResumeDraft(
+        headline="张三 | 面向 增长产品经理 的定制简历",
+        summary="具备 SQL 和 A/B Testing 相关经验。",
+        skills_section=["SQL", "A/B Testing"],
+        experience_section=[
+            ResumeSectionItem(
+                heading="产品经理",
+                subheading="A公司",
+                bullets=["推动 A/B 测试与漏斗优化，提升转化率 12% - 对应 JD 的数据分析要求"],
+            )
+        ],
+        markdown="# 张三 | 面向 增长产品经理 的定制简历",
+    )
+    jd_profile = JDProfile(job_title="增长产品经理", hiring_track="experienced", language="zh")
+    strategy = RewriteStrategy(audience_hint="experienced")
+    compliance_report = ComplianceReport(risk_level="low")
+    ats_report = ATSReport(score=83)
+
+    report = agent.run(draft, jd_profile, strategy, compliance_report, ats_report, force_fallback=True)
+
+    assert report.major_issues >= 1
+    assert any("JD" in issue or "注释" in issue for issue in report.minor_issues)
 
 
 def test_interview_prep_agent_accepts_structured_llm_output() -> None:

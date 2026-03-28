@@ -15,6 +15,18 @@ from backend.app.services.scoring.heuristics import normalize_token, unique_pres
 class ResumeRewriteAgent(BaseAgent):
     name = "resume_rewrite"
     prompt_name = "rewrite"
+    JD_META_MARKERS = (
+        "jd",
+        "岗位要求",
+        "任职要求",
+        "加分项",
+        "对应要求",
+        "对应 jd",
+        "匹配 jd",
+        "符合 jd",
+        "岗位匹配",
+        "岗位需求",
+    )
     ACTION_HINTS = {
         "负责",
         "推动",
@@ -212,14 +224,22 @@ class ResumeRewriteAgent(BaseAgent):
         )
 
     def _convert_sections(self, sections: List[TraceableSectionItem]) -> List[ResumeSectionItem]:
-        return [
-            ResumeSectionItem(
-                heading=section.heading,
-                subheading=section.subheading,
-                bullets=[bullet.text for bullet in section.bullets if bullet.text.strip()],
-            )
-            for section in sections
-        ]
+        converted_sections: List[ResumeSectionItem] = []
+        for section in sections:
+            cleaned_bullets = []
+            for bullet in section.bullets:
+                cleaned = self._sanitize_bullet_text(bullet.text)
+                if cleaned:
+                    cleaned_bullets.append(cleaned)
+            if cleaned_bullets:
+                converted_sections.append(
+                    ResumeSectionItem(
+                        heading=section.heading,
+                        subheading=section.subheading,
+                        bullets=cleaned_bullets,
+                    )
+                )
+        return converted_sections
 
     def _build_traceability(
         self,
@@ -235,6 +255,9 @@ class ResumeRewriteAgent(BaseAgent):
 
         for section_index, section in enumerate(experience_sections, start=1):
             for bullet_index, bullet in enumerate(section.bullets, start=1):
+                cleaned_text = self._sanitize_bullet_text(bullet.text)
+                if not cleaned_text:
+                    continue
                 fact_ids = [fact_id for fact_id in bullet.fact_ids if fact_id in fact_id_set]
                 if not fact_ids and bullet.text in exact_text_map:
                     fact_ids = exact_text_map[bullet.text]
@@ -246,6 +269,9 @@ class ResumeRewriteAgent(BaseAgent):
                 )
         for section_index, section in enumerate(project_sections, start=1):
             for bullet_index, bullet in enumerate(section.bullets, start=1):
+                cleaned_text = self._sanitize_bullet_text(bullet.text)
+                if not cleaned_text:
+                    continue
                 fact_ids = [fact_id for fact_id in bullet.fact_ids if fact_id in fact_id_set]
                 if not fact_ids and bullet.text in exact_text_map:
                     fact_ids = exact_text_map[bullet.text]
@@ -549,6 +575,45 @@ class ResumeRewriteAgent(BaseAgent):
             lines.extend("- {0}".format(bullet) for bullet in item.bullets)
             lines.append("")
         return lines
+
+    def _sanitize_bullet_text(self, bullet: str) -> str:
+        value = (bullet or "").strip()
+        if not value:
+            return ""
+
+        value = re.sub(
+            r"\s*[（(][^）)]*(?:JD|岗位要求|任职要求|加分项|对应要求|岗位需求|匹配 JD|符合 JD)[^）)]*[）)]\s*",
+            "",
+            value,
+            flags=re.IGNORECASE,
+        ).strip()
+
+        separator_match = re.match(
+            r"^(?P<core>.+?)\s*(?:[-—–:：;；,，])\s*(?P<meta>.+)$",
+            value,
+        )
+        if separator_match and self._looks_like_jd_tail(separator_match.group("meta")):
+            value = separator_match.group("core").strip()
+
+        clause_split = re.split(r"(?:(?:，|,|；|;)\s*)", value)
+        if len(clause_split) > 1 and self._looks_like_jd_tail(clause_split[-1]):
+            value = "，".join(part.strip() for part in clause_split[:-1] if part.strip()).strip()
+
+        return value.strip(" -—–:：;；,，")
+
+    def _looks_like_jd_tail(self, text: str) -> bool:
+        normalized = normalize_token(text)
+        if not normalized:
+            return False
+        if any(marker in normalized for marker in self.JD_META_MARKERS):
+            return True
+        if "对应" in text and ("要求" in text or "岗位" in text):
+            return True
+        if "匹配" in text and ("岗位" in text or "jd" in normalized):
+            return True
+        if "符合" in text and ("岗位" in text or "jd" in normalized):
+            return True
+        return False
 
     def _summary_skills(self, candidate: CandidateProfile, gap_analysis: GapAnalysis) -> List[str]:
         return unique_preserve_order(gap_analysis.strengths + candidate.skills.hard_skills + candidate.skills.tools)
