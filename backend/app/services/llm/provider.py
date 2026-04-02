@@ -63,6 +63,12 @@ class OpenAICompatibleProvider:
             ],
             "temperature": metadata.get("temperature", 0),
         }
+        if metadata.get("max_tokens"):
+            payload["max_tokens"] = int(metadata["max_tokens"])
+        if "enable_thinking" in metadata:
+            payload["enable_thinking"] = bool(metadata["enable_thinking"])
+        elif self._requires_explicit_disable_thinking():
+            payload["enable_thinking"] = False
 
         if metadata.get("expect_json"):
             response_format = metadata.get("response_format", "json_object")
@@ -103,6 +109,9 @@ class OpenAICompatibleProvider:
                 time.sleep(min(1.5, 0.4 * attempt))
 
         raise RuntimeError(self._format_connect_error(last_error or RuntimeError("Unknown connection error")))
+
+    def _requires_explicit_disable_thinking(self) -> bool:
+        return self.model.strip().lower().startswith("qwen3")
 
     def _extract_content(self, payload: Dict[str, Any]) -> str:
         choices = payload.get("choices") or []

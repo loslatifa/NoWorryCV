@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     llm_base_url: str = "https://api.openai.com/v1"
     llm_timeout_seconds: float = 45.0
     llm_max_retries: int = 2
-    llm_response_format: str = "json_object"
+    llm_response_format: str = "json_schema"
     llm_strict_mode: bool = True
     qwen_api_key: str = Field(
         default="",

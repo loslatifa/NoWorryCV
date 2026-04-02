@@ -8,7 +8,10 @@ from backend.app.schemas.strategy import ResumeDraft, RewriteStrategy
 
 class CriticAgent(BaseAgent):
     name = "critic"
+    llm_metadata = {"max_tokens": 800}
     JD_META_MARKERS = ("JD", "岗位要求", "任职要求", "加分项", "对应要求", "岗位需求", "对应 JD", "匹配 JD", "符合 JD")
+    GENERIC_BULLET_MARKERS = ("相关经验", "相关能力", "能力基础", "能力证明", "业务推进", "结果交付", "相关工作", "学习能力")
+    WEAK_STARTERS = ("参与", "支持", "协助", "配合", "跟进", "assist", "support", "participate")
 
     def run(
         self,
@@ -83,6 +86,14 @@ class CriticAgent(BaseAgent):
             minor_issues.extend("检测到 JD 注释式 bullet：{0}".format(item) for item in jd_meta_bullets[:2])
             next_actions.append("移除 bullet 中的 JD/岗位要求说明，只保留真实经历的动作、场景、方法和结果。")
 
+        abstract_bullets = self._find_abstract_bullets(draft)
+        if abstract_bullets:
+            minor_issues.append("部分 bullet 仍像 AI 匹配稿，缺少具体动作、对象或结果。")
+            minor_issues.extend("表达偏抽象的 bullet：{0}".format(item) for item in abstract_bullets[:2])
+            next_actions.append("把抽象能力句改成简历句，优先写清动作、对象、方法/场景和结果。")
+            if len(abstract_bullets) >= 2:
+                major_issues += 1
+
         track = jd_profile.hiring_track
         if track == "campus":
             if not draft.education_section:
@@ -125,3 +136,23 @@ class CriticAgent(BaseAgent):
                 if ("对应" in bullet or "匹配" in bullet or "符合" in bullet) and ("岗位" in bullet or "要求" in bullet):
                     flagged.append(bullet)
         return flagged
+
+    def _find_abstract_bullets(self, draft: ResumeDraft):
+        flagged = []
+        for section in draft.experience_section + draft.project_section:
+            for bullet in section.bullets:
+                normalized = bullet.strip().lower()
+                if any(marker in bullet or marker in normalized for marker in self.GENERIC_BULLET_MARKERS):
+                    flagged.append(bullet)
+                    continue
+                if any(normalized.startswith(token) for token in self.WEAK_STARTERS):
+                    if not any(char.isdigit() for char in bullet) and not self._has_result_signal(bullet):
+                        flagged.append(bullet)
+        return flagged
+
+    def _has_result_signal(self, bullet: str) -> bool:
+        result_markers = ("提升", "降低", "增长", "转化", "节省", "优化", "improve", "increase", "reduce", "impact")
+        lower = bullet.lower()
+        if any(marker in bullet or marker in lower for marker in result_markers):
+            return True
+        return any(char.isdigit() for char in bullet)

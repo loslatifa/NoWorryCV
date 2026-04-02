@@ -2,6 +2,7 @@ from typing import List
 
 from backend.app.agents.base import BaseAgent
 from backend.app.agents.base import _NO_FALLBACK
+from backend.app.schemas.agent_outputs import InterviewPrepDocumentStructuredOutput
 from backend.app.schemas.candidate import CandidateProfile
 from backend.app.schemas.common import FactCard
 from backend.app.schemas.jd import JDProfile
@@ -13,6 +14,7 @@ from backend.app.services.llm.structured import StructuredLLMError
 
 class InterviewPrepAgent(BaseAgent):
     name = "interview_prep"
+    llm_metadata = {"max_tokens": 900}
 
     def run(
         self,
@@ -41,22 +43,120 @@ class InterviewPrepAgent(BaseAgent):
             return fallback_result
 
         try:
-            document = self.invoke_structured(
-                context={
-                    "candidate_profile": candidate_profile,
-                    "fact_cards": fact_cards,
-                    "jd_profile": jd_profile,
-                    "gap_analysis": gap_analysis,
-                    "rewrite_strategy": rewrite_strategy,
-                    "resume_draft": draft,
-                    "latest_review": latest_review,
-                    "language": language,
-                },
-                response_model=InterviewPrepDocument,
+            structured_document = self.invoke_structured(
+                context=self._build_llm_context(
+                    candidate_profile,
+                    fact_cards,
+                    jd_profile,
+                    gap_analysis,
+                    rewrite_strategy,
+                    draft,
+                    latest_review,
+                    language,
+                ),
+                response_model=InterviewPrepDocumentStructuredOutput,
+            )
+            document = InterviewPrepDocument(
+                title=structured_document.title,
+                prep_summary=structured_document.prep_summary,
+                likely_focus_areas=structured_document.likely_focus_areas,
+                ba_gu_questions=structured_document.ba_gu_questions,
+                project_deep_dive_questions=structured_document.project_deep_dive_questions,
+                experience_deep_dive_questions=structured_document.experience_deep_dive_questions,
+                behavioral_questions=structured_document.behavioral_questions,
+                risk_alerts=structured_document.risk_alerts,
+                answer_framework=structured_document.answer_framework,
             )
             return self._normalize_document(document, fallback)
         except StructuredLLMError as exc:
             return self.fallback_on_error(exc, fallback)
+
+    def _build_llm_context(
+        self,
+        candidate_profile: CandidateProfile,
+        fact_cards: List[FactCard],
+        jd_profile: JDProfile,
+        gap_analysis: GapAnalysis,
+        rewrite_strategy: RewriteStrategy,
+        draft: ResumeDraft,
+        latest_review: ReviewBundle,
+        language: str,
+    ) -> dict:
+        del fact_cards
+        experience_items = [
+            {
+                "heading": item.heading,
+                "subheading": item.subheading,
+                "bullets": item.bullets[:2],
+            }
+            for item in draft.experience_section[:3]
+        ]
+        project_items = [
+            {
+                "heading": item.heading,
+                "subheading": item.subheading,
+                "bullets": item.bullets[:2],
+            }
+            for item in draft.project_section[:2]
+        ]
+        work_highlights = [
+            {
+                "company": experience.company,
+                "title": experience.title,
+                "achievements": experience.achievements[:2],
+            }
+            for experience in candidate_profile.work_experiences[:2]
+        ]
+        project_highlights = [
+            {
+                "name": project.name,
+                "role": project.role,
+                "bullets": project.bullets[:2],
+                "skills_used": project.skills_used[:3],
+            }
+            for project in candidate_profile.projects[:2]
+        ]
+        return {
+            "language": language,
+            "jd_profile": {
+                "job_title": jd_profile.job_title,
+                "department": jd_profile.department,
+                "hiring_track": jd_profile.hiring_track,
+                "must_have_skills": jd_profile.must_have_skills[:4],
+                "keywords": jd_profile.keywords[:6],
+                "responsibilities": jd_profile.responsibilities[:3],
+                "domain_signals": jd_profile.domain_signals[:3],
+            },
+            "gap_analysis": {
+                "recommended_focus": gap_analysis.recommended_focus[:6],
+                "risk_points": gap_analysis.risk_points[:4],
+                "strengths": gap_analysis.strengths[:4],
+            },
+            "rewrite_strategy": {
+                "audience_hint": rewrite_strategy.audience_hint,
+                "summary_style": rewrite_strategy.summary_style,
+                "section_priority": rewrite_strategy.section_priority[:5],
+            },
+            "resume_draft": {
+                "headline": draft.headline,
+                "summary": draft.summary,
+                "skills_section": draft.skills_section[:8],
+                "experience_section": experience_items,
+                "project_section": project_items,
+            },
+            "candidate_signals": {
+                "work_highlights": work_highlights,
+                "project_highlights": project_highlights,
+                "education": candidate_profile.education[:2],
+            },
+            "latest_review": {
+                "ats_score": latest_review.ats_report.score,
+                "risk_level": latest_review.compliance_report.risk_level,
+                "unsupported_claims": latest_review.compliance_report.unsupported_claims[:2],
+                "exaggeration_warnings": latest_review.compliance_report.exaggeration_warnings[:3],
+                "critic_issues": latest_review.critic_report.minor_issues[:4],
+            },
+        }
 
     def _run_fallback(
         self,

@@ -1,7 +1,13 @@
 from typing import Dict, Iterable, List
 
 from backend.app.schemas.jd import JDProfile, KnowledgeReviewCard
-from backend.app.services.scoring.heuristics import normalize_token, unique_preserve_order
+from backend.app.services.scoring.heuristics import (
+    canonicalize_skills,
+    extract_known_skills,
+    extract_tokens,
+    normalize_token,
+    unique_preserve_order,
+)
 
 
 TOPIC_LIBRARY: Dict[str, Dict[str, str]] = {
@@ -86,7 +92,7 @@ TOPIC_LIBRARY: Dict[str, Dict[str, str]] = {
 
 
 def build_review_cards(jd_profile: JDProfile, jd_text: str, max_cards: int = 5) -> List[KnowledgeReviewCard]:
-    topics = _collect_topics(jd_profile)
+    topics = _collect_topics(jd_profile, jd_text)
     evidence_lines = _build_evidence_map(topics, jd_profile, jd_text)
     cards: List[KnowledgeReviewCard] = []
     for index, topic in enumerate(topics[:max_cards], start=1):
@@ -124,12 +130,43 @@ def build_review_cards(jd_profile: JDProfile, jd_text: str, max_cards: int = 5) 
     return cards
 
 
-def _collect_topics(jd_profile: JDProfile) -> List[str]:
+def _collect_topics(jd_profile: JDProfile, jd_text: str) -> List[str]:
     items: List[str] = []
     items.extend(jd_profile.must_have_skills)
     items.extend(jd_profile.nice_to_have_skills[:2])
+    items.extend(jd_profile.keywords[:4])
     items.extend(jd_profile.domain_signals)
     items.extend(_responsibility_phrases(jd_profile.responsibilities))
+    items.extend(_collect_topics_from_jd_text(jd_text))
+    topics = [topic for topic in unique_preserve_order(items) if _is_card_worthy(topic)]
+    if topics:
+        return topics
+    job_title = (jd_profile.job_title or "").strip()
+    if _is_card_worthy(job_title):
+        return [job_title]
+    return []
+
+
+def _collect_topics_from_jd_text(jd_text: str) -> List[str]:
+    items: List[str] = []
+    items.extend(canonicalize_skills(extract_known_skills(jd_text)))
+
+    raw_lines = [line.strip() for line in jd_text.splitlines() if line.strip()]
+    for line in raw_lines:
+        cleaned_line = line
+        for prefix in ("岗位职责", "任职要求", "要求", "加分项", "职责"):
+            cleaned_line = cleaned_line.replace(prefix, "")
+        cleaned_line = cleaned_line.strip("：:- ")
+        if not cleaned_line:
+            continue
+        items.extend(_responsibility_phrases([cleaned_line]))
+
+    for token in extract_tokens(jd_text):
+        normalized = normalize_token(token)
+        if len(normalized) > 12:
+            continue
+        items.append(token)
+
     return [topic for topic in unique_preserve_order(items) if _is_card_worthy(topic)]
 
 

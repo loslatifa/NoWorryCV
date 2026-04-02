@@ -20,6 +20,7 @@ from backend.app.services.scoring.heuristics import canonicalize_skills, extract
 
 class ResumeParserAgent(BaseAgent):
     name = "resume_parser"
+    llm_metadata = {"max_tokens": 1600}
     GENERIC_TITLE_LINES = {"resume", "cv", "个人简历", "简历"}
     ACTION_HINTS = {
         "负责",

@@ -1,5 +1,5 @@
 import re
-from typing import List
+from typing import Dict, List, Optional
 
 from backend.app.agents.base import BaseAgent
 from backend.app.agents.base import _NO_FALLBACK
@@ -15,6 +15,7 @@ from backend.app.services.scoring.heuristics import normalize_token, unique_pres
 class ResumeRewriteAgent(BaseAgent):
     name = "resume_rewrite"
     prompt_name = "rewrite"
+    llm_metadata = {"max_tokens": 1600}
     JD_META_MARKERS = (
         "jd",
         "岗位要求",
@@ -62,6 +63,56 @@ class ResumeRewriteAgent(BaseAgent):
         "result",
         "impact",
     }
+    WEAK_ACTION_HINTS = {
+        "参与",
+        "支持",
+        "协助",
+        "配合",
+        "跟进",
+        "assist",
+        "support",
+        "participate",
+        "helped",
+    }
+    GENERIC_BULLET_MARKERS = {
+        "相关经验",
+        "相关能力",
+        "能力基础",
+        "能力证明",
+        "业务推进",
+        "结果交付",
+        "岗位场景",
+        "岗位方向",
+        "支持业务",
+        "推动业务",
+        "经验沉淀",
+        "学习能力",
+        "执行能力",
+        "相关工作",
+        "相关事项",
+    }
+    CAMPUS_PROJECT_HINTS = {
+        "项目",
+        "课程",
+        "竞赛",
+        "校园",
+        "研究",
+        "实验",
+        "社团",
+        "实习",
+    }
+    EXPERIENCED_SCOPE_HINTS = {
+        "跨团队",
+        "协同",
+        "协调",
+        "推进",
+        "owner",
+        "ownership",
+        "stakeholder",
+        "scope",
+        "负责",
+        "主导",
+    }
 
     def run(
         self,
@@ -91,7 +142,14 @@ class ResumeRewriteAgent(BaseAgent):
             )
             if self.strict_llm_mode and self._is_structured_output_incomplete(structured_output, fallback, strategy):
                 raise StructuredLLMError("Rewrite agent returned incomplete structured output.")
-            draft = self._from_structured_output(structured_output, fact_cards, language, strategy, fallback)
+            draft = self._from_structured_output(
+                structured_output,
+                fact_cards,
+                gap_analysis,
+                language,
+                strategy,
+                fallback,
+            )
             if not self._has_traceable_content(draft):
                 raise StructuredLLMError("Rewrite agent returned insufficient traceable content.")
             return draft
@@ -114,7 +172,12 @@ class ResumeRewriteAgent(BaseAgent):
 
         experience_section: List[ResumeSectionItem] = []
         for exp_index, experience in enumerate(experiences, start=1):
-            bullets = self._rank_bullets(experience.bullets, gap_analysis, strategy.max_bullets_per_experience)
+            bullets = self._rank_bullets(
+                experience.bullets,
+                gap_analysis,
+                strategy.max_bullets_per_experience,
+                strategy.audience_hint,
+            )
             experience_section.append(
                 ResumeSectionItem(
                     heading=experience.title or experience.company or "Experience",
@@ -133,7 +196,7 @@ class ResumeRewriteAgent(BaseAgent):
         project_section: List[ResumeSectionItem] = []
         if strategy.include_projects:
             for project_index, project in enumerate(projects, start=1):
-                bullets = self._rank_bullets(project.bullets, gap_analysis, 2)
+                bullets = self._rank_bullets(project.bullets, gap_analysis, 2, strategy.audience_hint)
                 project_section.append(
                     ResumeSectionItem(
                         heading=project.name,
@@ -178,17 +241,28 @@ class ResumeRewriteAgent(BaseAgent):
         self,
         output: ResumeDraftStructuredOutput,
         fact_cards: List[FactCard],
+        gap_analysis: GapAnalysis,
         language: str,
         strategy: RewriteStrategy,
         fallback: ResumeDraft,
     ) -> ResumeDraft:
         fact_id_set = {card.id for card in fact_cards}
         used_fallback_sections = False
-        experience_section = self._convert_sections(output.experience_section)
+        experience_section = self._convert_sections(
+            output.experience_section,
+            fact_cards,
+            gap_analysis,
+            strategy.audience_hint,
+        )
         if not self.strict_llm_mode and self._should_use_fallback_sections(experience_section, fallback.experience_section):
             experience_section = fallback.experience_section
             used_fallback_sections = True
-        project_section = self._convert_sections(output.project_section)
+        project_section = self._convert_sections(
+            output.project_section,
+            fact_cards,
+            gap_analysis,
+            strategy.audience_hint,
+        )
         if strategy.include_projects and not self.strict_llm_mode and self._should_use_fallback_sections(project_section, fallback.project_section):
             project_section = fallback.project_section
             used_fallback_sections = True
@@ -223,15 +297,30 @@ class ResumeRewriteAgent(BaseAgent):
             traceability=traceability,
         )
 
-    def _convert_sections(self, sections: List[TraceableSectionItem]) -> List[ResumeSectionItem]:
+    def _convert_sections(
+        self,
+        sections: List[TraceableSectionItem],
+        fact_cards: List[FactCard],
+        gap_analysis: GapAnalysis,
+        audience_hint: str,
+    ) -> List[ResumeSectionItem]:
+        fact_lookup = {card.id: card.text for card in fact_cards}
         converted_sections: List[ResumeSectionItem] = []
         for section in sections:
             cleaned_bullets = []
             for bullet in section.bullets:
                 cleaned = self._sanitize_bullet_text(bullet.text)
+                cleaned = self._restore_fact_grounded_bullet(
+                    cleaned,
+                    bullet.fact_ids,
+                    fact_lookup,
+                    gap_analysis,
+                    audience_hint,
+                )
                 if cleaned:
                     cleaned_bullets.append(cleaned)
             if cleaned_bullets:
+                cleaned_bullets = self._rank_bullets(cleaned_bullets, gap_analysis, None, audience_hint)
                 converted_sections.append(
                     ResumeSectionItem(
                         heading=section.heading,
@@ -346,12 +435,25 @@ class ResumeRewriteAgent(BaseAgent):
         gap_analysis: GapAnalysis,
     ) -> List[WorkExperience]:
         scored = []
-        for experience in experiences:
+        for index, experience in enumerate(experiences):
             haystack = normalize_token(" ".join([experience.title or "", experience.company or ""] + experience.bullets))
-            score = sum(1 for keyword in gap_analysis.strengths if normalize_token(keyword) in haystack)
-            scored.append((score, experience))
-        scored.sort(key=lambda item: item[0], reverse=True)
-        return [item[1] for item in scored[: strategy.max_experiences]]
+            score = sum(2 for keyword in gap_analysis.recommended_focus if normalize_token(keyword) in haystack)
+            score += sum(1 for keyword in gap_analysis.strengths if normalize_token(keyword) in haystack)
+            score += min(
+                4,
+                sum(
+                    self._bullet_quality_score(bullet, gap_analysis, strategy.audience_hint)
+                    for bullet in experience.bullets
+                ),
+            )
+            score += min(2, len(experience.achievements))
+            if any(any(char.isdigit() for char in bullet) for bullet in experience.bullets + experience.achievements):
+                score += 2
+            if strategy.audience_hint == "experienced" and experience.achievements:
+                score += 2
+            scored.append((score, -index, experience))
+        scored.sort(key=lambda item: (item[0], item[1]), reverse=True)
+        return [item[2] for item in scored[: strategy.max_experiences]]
 
     def _select_projects(
         self,
@@ -362,29 +464,38 @@ class ResumeRewriteAgent(BaseAgent):
         if not strategy.include_projects:
             return []
         scored = []
-        for project in projects:
+        for index, project in enumerate(projects):
             haystack = normalize_token(" ".join([project.name] + project.bullets))
-            score = sum(1 for keyword in gap_analysis.recommended_focus if normalize_token(keyword) in haystack)
-            scored.append((score, project))
-        scored.sort(key=lambda item: item[0], reverse=True)
-        return [item[1] for item in scored[:2]]
+            score = sum(2 for keyword in gap_analysis.recommended_focus if normalize_token(keyword) in haystack)
+            score += min(
+                4,
+                sum(
+                    self._bullet_quality_score(bullet, gap_analysis, strategy.audience_hint)
+                    for bullet in project.bullets
+                ),
+            )
+            if strategy.audience_hint in {"campus", "intern"}:
+                score += 2
+            scored.append((score, -index, project))
+        scored.sort(key=lambda item: (item[0], item[1]), reverse=True)
+        return [item[2] for item in scored[:2]]
 
-    def _rank_bullets(self, bullets: List[str], gap_analysis: GapAnalysis, max_items: int) -> List[str]:
+    def _rank_bullets(
+        self,
+        bullets: List[str],
+        gap_analysis: GapAnalysis,
+        max_items: Optional[int],
+        audience_hint: str = "general",
+    ) -> List[str]:
         scored = []
         for index, bullet in enumerate(unique_preserve_order(bullets)):
-            normalized = normalize_token(bullet)
-            score = sum(1 for keyword in gap_analysis.recommended_focus if normalize_token(keyword) in normalized)
-            if any(char.isdigit() for char in bullet):
-                score += 3
-            if any(token in bullet for token in self.ACTION_HINTS) or any(token in normalized for token in self.ACTION_HINTS):
-                score += 2
-            if any(token in bullet for token in self.RESULT_HINTS) or any(token in normalized for token in self.RESULT_HINTS):
-                score += 2
-            if 14 <= len(bullet) <= 80:
-                score += 1
+            score = self._bullet_quality_score(bullet, gap_analysis, audience_hint)
             scored.append((score, -index, bullet))
         scored.sort(key=lambda item: (item[0], item[1]), reverse=True)
-        return [item[2] for item in scored[:max_items]]
+        ranked = [item[2] for item in scored]
+        if max_items is None:
+            return ranked
+        return ranked[:max_items]
 
     def _select_skills(
         self,
@@ -403,6 +514,30 @@ class ResumeRewriteAgent(BaseAgent):
             if line:
                 lines.append(line)
         return lines
+
+    def _bullet_quality_score(self, bullet: str, gap_analysis: GapAnalysis, audience_hint: str) -> int:
+        normalized = normalize_token(bullet)
+        score = sum(2 for keyword in gap_analysis.recommended_focus if normalize_token(keyword) in normalized)
+        score += sum(1 for keyword in gap_analysis.strengths if normalize_token(keyword) in normalized)
+        if any(char.isdigit() for char in bullet):
+            score += 3
+        if self._has_action_signal(bullet, normalized):
+            score += 2
+        if self._has_result_signal(bullet, normalized):
+            score += 2
+        if self._has_concrete_context(bullet, normalized):
+            score += 1
+        if 14 <= len(bullet) <= 90:
+            score += 1
+        if self._looks_abstract_or_ai_like(bullet, normalized):
+            score -= 4
+        if self._starts_with_weak_action(normalized) and not self._has_result_signal(bullet, normalized):
+            score -= 2
+        if audience_hint in {"campus", "intern"} and any(token in bullet for token in self.CAMPUS_PROJECT_HINTS):
+            score += 1
+        if audience_hint == "experienced" and any(token.lower() in normalized for token in self.EXPERIENCED_SCOPE_HINTS):
+            score += 1
+        return score
 
     def _build_summary(
         self,
@@ -615,21 +750,84 @@ class ResumeRewriteAgent(BaseAgent):
             return True
         return False
 
+    def _restore_fact_grounded_bullet(
+        self,
+        bullet: str,
+        fact_ids: List[str],
+        fact_lookup: Dict[str, str],
+        gap_analysis: GapAnalysis,
+        audience_hint: str,
+    ) -> str:
+        value = (bullet or "").strip()
+        if not value or not fact_ids:
+            return value
+        source_candidates = [fact_lookup[fact_id] for fact_id in fact_ids if fact_id in fact_lookup]
+        if not source_candidates:
+            return value
+        normalized = normalize_token(value)
+        if not self._looks_abstract_or_ai_like(value, normalized):
+            return value
+        ranked_sources = sorted(
+            source_candidates,
+            key=lambda item: self._bullet_quality_score(item, gap_analysis, audience_hint),
+            reverse=True,
+        )
+        source_text = self._sanitize_bullet_text(ranked_sources[0])
+        if not source_text:
+            return value
+        source_score = self._bullet_quality_score(source_text, gap_analysis, audience_hint)
+        candidate_score = self._bullet_quality_score(value, gap_analysis, audience_hint)
+        if source_score >= candidate_score + 2:
+            return source_text
+        return value
+
+    def _has_action_signal(self, bullet: str, normalized: str) -> bool:
+        return any(token in bullet for token in self.ACTION_HINTS) or any(token in normalized for token in self.ACTION_HINTS)
+
+    def _has_result_signal(self, bullet: str, normalized: str) -> bool:
+        return any(token in bullet for token in self.RESULT_HINTS) or any(token in normalized for token in self.RESULT_HINTS)
+
+    def _has_concrete_context(self, bullet: str, normalized: str) -> bool:
+        if any(symbol in bullet for symbol in ("SQL", "A/B", "Tableau", "Power BI", "Python", "Excel")):
+            return True
+        context_terms = ("用户", "漏斗", "实验", "看板", "渠道", "投放", "增长", "转化", "项目", "指标", "复盘", "分析")
+        return any(term in bullet or term in normalized for term in context_terms)
+
+    def _starts_with_weak_action(self, normalized: str) -> bool:
+        return any(normalized.startswith(token) for token in self.WEAK_ACTION_HINTS)
+
+    def _looks_abstract_or_ai_like(self, bullet: str, normalized: str) -> bool:
+        if any(marker in bullet or marker in normalized for marker in self.GENERIC_BULLET_MARKERS):
+            return True
+        if "能力" in bullet and not any(char.isdigit() for char in bullet):
+            return True
+        if self._starts_with_weak_action(normalized) and not self._has_result_signal(bullet, normalized):
+            return True
+        if len(normalized) < 10:
+            return True
+        return False
+
     def _summary_skills(self, candidate: CandidateProfile, gap_analysis: GapAnalysis) -> List[str]:
         return unique_preserve_order(gap_analysis.strengths + candidate.skills.hard_skills + candidate.skills.tools)
 
     def _best_project_signal(self, candidate: CandidateProfile) -> str:
+        candidates = []
+        empty_gap = GapAnalysis()
         for project in candidate.projects:
-            if project.bullets:
-                return project.bullets[0]
-        return ""
+            for bullet in project.bullets:
+                candidates.append((self._bullet_quality_score(bullet, empty_gap, "campus"), bullet))
+        candidates.sort(key=lambda item: item[0], reverse=True)
+        return candidates[0][1] if candidates else ""
 
     def _best_experience_signal(self, candidate: CandidateProfile) -> str:
+        candidates = []
+        empty_gap = GapAnalysis()
         for experience in candidate.work_experiences:
             for bullet in experience.achievements + experience.bullets:
                 if bullet:
-                    return bullet
-        return ""
+                    candidates.append((self._bullet_quality_score(bullet, empty_gap, "experienced"), bullet))
+        candidates.sort(key=lambda item: item[0], reverse=True)
+        return candidates[0][1] if candidates else ""
 
     def _shorten_signal(self, signal: str) -> str:
         value = (signal or "").strip().strip("。.;；")

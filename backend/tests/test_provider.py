@@ -121,3 +121,80 @@ def test_openai_compatible_provider_surfaces_dns_message_after_retries(monkeypat
 
     assert "dashscope.aliyuncs.com" in message
     assert "DNS resolution" in message
+
+
+def test_qwen3_provider_sets_enable_thinking_false_for_non_streaming_calls(monkeypatch) -> None:
+    captured = {}
+
+    class FakeResponse:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self):
+            return {"choices": [{"message": {"content": '{"status":"ok"}'}}]}
+
+    class FakeClient:
+        def __init__(self, timeout=None) -> None:
+            self.timeout = timeout
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def post(self, url, headers=None, json=None):
+            del url, headers
+            captured["payload"] = json
+            return FakeResponse()
+
+    monkeypatch.setattr(provider_module.httpx, "Client", FakeClient)
+
+    provider = OpenAICompatibleProvider(
+        api_key="test-key",
+        model="qwen3-32b",
+        base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+    )
+
+    result = provider.complete("Return JSON.", '{"status":"ok"}', metadata={"expect_json": True})
+
+    assert result == '{"status":"ok"}'
+    assert captured["payload"]["enable_thinking"] is False
+
+
+def test_non_qwen3_provider_does_not_set_enable_thinking_by_default(monkeypatch) -> None:
+    captured = {}
+
+    class FakeResponse:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self):
+            return {"choices": [{"message": {"content": '{"status":"ok"}'}}]}
+
+    class FakeClient:
+        def __init__(self, timeout=None) -> None:
+            self.timeout = timeout
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def post(self, url, headers=None, json=None):
+            del url, headers
+            captured["payload"] = json
+            return FakeResponse()
+
+    monkeypatch.setattr(provider_module.httpx, "Client", FakeClient)
+
+    provider = OpenAICompatibleProvider(
+        api_key="test-key",
+        model="qwen-plus",
+        base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+    )
+
+    provider.complete("Return JSON.", '{"status":"ok"}', metadata={"expect_json": True})
+
+    assert "enable_thinking" not in captured["payload"]

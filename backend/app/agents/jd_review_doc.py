@@ -2,6 +2,7 @@ from typing import List
 
 from backend.app.agents.base import BaseAgent
 from backend.app.agents.base import _NO_FALLBACK
+from backend.app.schemas.agent_outputs import JDReviewDocumentStructuredOutput
 from backend.app.schemas.jd import JDProfile, KnowledgeReviewCard
 from backend.app.schemas.prep import JDReviewDocument
 from backend.app.services.llm.structured import StructuredLLMError
@@ -9,6 +10,7 @@ from backend.app.services.llm.structured import StructuredLLMError
 
 class JDReviewDocAgent(BaseAgent):
     name = "jd_review_doc"
+    llm_metadata = {"max_tokens": 1000}
 
     def run(
         self,
@@ -23,13 +25,22 @@ class JDReviewDocAgent(BaseAgent):
             return fallback_result
 
         try:
-            document = self.invoke_structured(
+            structured_document = self.invoke_structured(
                 context={
                     "jd_profile": jd_profile,
                     "jd_text": jd_text,
                     "review_cards": review_cards,
                 },
-                response_model=JDReviewDocument,
+                response_model=JDReviewDocumentStructuredOutput,
+            )
+            document = JDReviewDocument(
+                title=structured_document.title,
+                role_summary=structured_document.role_summary,
+                hiring_track_hint=structured_document.hiring_track_hint,
+                core_requirements=structured_document.core_requirements,
+                key_topics=review_cards[:5],
+                foundational_questions=structured_document.foundational_questions,
+                review_plan=structured_document.review_plan,
             )
             return self._normalize_document(document, fallback)
         except StructuredLLMError as exc:

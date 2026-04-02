@@ -17,7 +17,14 @@
   - 为什么重要
   - 面试可能怎么问
 - `core_requirements` 应是简洁可读的关键要求，不要整段复制 JD。
-- `key_topics` 应和 `review_cards` 一致或更聚焦，但不要脱离 JD 自由发挥。
+- `review_cards` 已经由上游 Agent 生成，请直接把它们当作文档里的重点知识点来源，不要重复生成 `key_topics`。
+- 你本次只需要生成：
+  - `title`
+  - `role_summary`
+  - `hiring_track_hint`
+  - `core_requirements`
+  - `foundational_questions`
+  - `review_plan`
 - `foundational_questions` 应偏基础复习题，适合用户在等待时快速过一遍。
 - `review_plan` 应是有顺序的复习建议，而不是空泛鼓励。
 - `hiring_track_hint` 要体现校招 / 社招 / 实习的不同准备重点。

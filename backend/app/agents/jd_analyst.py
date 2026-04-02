@@ -4,6 +4,7 @@ from typing import List
 from backend.app.agents.base import BaseAgent
 from backend.app.agents.base import _NO_FALLBACK
 from backend.app.services.llm.structured import StructuredLLMError
+from backend.app.schemas.agent_outputs import JDProfileStructuredOutput
 from backend.app.schemas.jd import JDProfile
 from backend.app.services.parsers.file_parser import detect_language, first_non_empty_line
 from backend.app.services.scoring.heuristics import canonicalize_skills, extract_known_skills, extract_tokens, normalize_token, split_inline_items, unique_preserve_order
@@ -11,6 +12,7 @@ from backend.app.services.scoring.heuristics import canonicalize_skills, extract
 
 class JDAnalystAgent(BaseAgent):
     name = "jd_analyst"
+    llm_metadata = {"max_tokens": 700}
     RESPONSIBILITY_LABELS = [
         "职责",
         "岗位职责",
@@ -86,9 +88,21 @@ class JDAnalystAgent(BaseAgent):
             return fallback_result
 
         try:
-            profile = self.invoke_structured(
+            structured_profile = self.invoke_structured(
                 context={"jd_text": jd_text},
-                response_model=JDProfile,
+                response_model=JDProfileStructuredOutput,
+            )
+            profile = JDProfile(
+                job_title=structured_profile.job_title,
+                department=structured_profile.department,
+                seniority=structured_profile.seniority,
+                hiring_track=structured_profile.hiring_track,
+                responsibilities=structured_profile.responsibilities,
+                must_have_skills=structured_profile.must_have_skills,
+                nice_to_have_skills=structured_profile.nice_to_have_skills,
+                keywords=structured_profile.keywords,
+                domain_signals=structured_profile.domain_signals,
+                language=structured_profile.language,
             )
             profile.job_title = self._clean_job_title(profile.job_title or first_non_empty_line(jd_text) or "")
             if not profile.language or profile.language == "auto":

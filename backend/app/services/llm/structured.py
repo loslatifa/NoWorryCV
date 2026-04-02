@@ -46,6 +46,7 @@ class StructuredLLMService:
         context: Dict[str, Any],
         response_model: Type[ModelT],
         max_retries: Optional[int] = None,
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> ModelT:
         if not self.is_available:
             raise StructuredLLMError("No live LLM provider available.")
@@ -56,18 +57,21 @@ class StructuredLLMService:
         total_attempts = max_retries or self.max_retries
         last_error: Optional[Exception] = None
         response_format = self.response_format
+        request_metadata = dict(metadata or {})
 
         for _ in range(total_attempts):
             try:
+                provider_metadata = {
+                    **request_metadata,
+                    "expect_json": True,
+                    "schema_name": response_model.__name__.lower(),
+                    "json_schema": response_model.model_json_schema(),
+                    "response_format": response_format,
+                }
                 raw_output = self.provider.complete(
                     system_prompt=system_prompt,
                     user_prompt=user_prompt,
-                    metadata={
-                        "expect_json": True,
-                        "schema_name": response_model.__name__.lower(),
-                        "json_schema": response_model.model_json_schema(),
-                        "response_format": response_format,
-                    },
+                    metadata=provider_metadata,
                 )
                 payload = self._extract_json(raw_output)
                 return response_model.model_validate_json(payload)

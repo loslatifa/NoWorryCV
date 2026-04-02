@@ -15,7 +15,7 @@
   - `gap_analysis`
   - `latest_review`
   - `candidate_profile`
-  - `fact_cards`
+- 你拿到的是压缩过的关键信息，不需要补全未提供的细节。
 - `likely_focus_areas` 应尽量对应 JD 要求和当前简历重点。
 - `ba_gu_questions` 应覆盖基础知识、方法论和岗位常见考点。
 - `project_deep_dive_questions` 应围绕项目背景、目标、动作、结果、复盘。
@@ -25,4 +25,14 @@
 - `answer_framework` 应给出简洁、可执行的答题建议。
 - 校招 / 社招 / 实习必须体现不同准备重点。
 - 不要输出模板化“请准备自我介绍”式空话，除非与当前 JD 和简历明确相关。
+- 每个字段都尽量简洁：
+  - `likely_focus_areas` 最多 4 条
+  - `ba_gu_questions` 最多 4 条
+  - `project_deep_dive_questions` 最多 4 条
+  - `experience_deep_dive_questions` 最多 4 条
+  - `behavioral_questions` 最多 3 条
+  - `risk_alerts` 最多 4 条
+  - `answer_framework` 最多 4 条
+- 每条内容尽量控制在一句话，不要写成长段解释。
+- 只输出 JSON，不要输出 Markdown，不要输出额外说明文字。
 - 输出必须与 JSON Schema 完全一致。

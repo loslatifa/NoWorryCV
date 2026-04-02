@@ -11,6 +11,7 @@ _NO_FALLBACK = object()
 class BaseAgent:
     name = "base"
     prompt_name = ""
+    llm_metadata: Dict[str, Any] = {}
 
     def __init__(self, llm_service: Optional[StructuredLLMService] = None) -> None:
         self.llm_service = llm_service or get_structured_llm_service()
@@ -32,9 +33,13 @@ class BaseAgent:
                 agent_name=self.prompt_key,
                 context=context,
                 response_model=response_model,
+                metadata=self.generation_metadata(),
             )
         except StructuredLLMError:
             raise
+
+    def generation_metadata(self) -> Dict[str, Any]:
+        return dict(self.llm_metadata)
 
     @property
     def strict_llm_mode(self) -> bool:

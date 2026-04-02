@@ -13,6 +13,7 @@ from backend.app.services.scoring.heuristics import normalize_token
 
 class StrategyAgent(BaseAgent):
     name = "strategy"
+    llm_metadata = {"max_tokens": 700}
 
     def run(
         self,
@@ -30,18 +31,32 @@ class StrategyAgent(BaseAgent):
 
         try:
             strategy = self.invoke_structured(
-                context={
-                    "candidate_profile": candidate_profile,
-                    "gap_analysis": gap_analysis,
-                    "fact_cards": fact_cards,
-                    "jd_profile": jd_profile,
-                    "language": language,
-                },
+                context=self._build_llm_context(
+                    candidate_profile,
+                    gap_analysis,
+                    fact_cards,
+                    jd_profile,
+                    language,
+                ),
                 response_model=RewriteStrategy,
             )
             return self._normalize_strategy(strategy, fact_cards, fallback)
         except StructuredLLMError as exc:
-            return self.fallback_on_error(exc, fallback)
+            try:
+                compact_strategy = self.invoke_structured(
+                    context=self._build_llm_context(
+                        candidate_profile,
+                        gap_analysis,
+                        fact_cards,
+                        jd_profile,
+                        language,
+                        compact_mode=True,
+                    ),
+                    response_model=RewriteStrategy,
+                )
+                return self._normalize_strategy(compact_strategy, fact_cards, fallback)
+            except StructuredLLMError:
+                return self.fallback_on_error(exc, fallback)
 
     def _run_fallback(
         self,
@@ -146,15 +161,21 @@ class StrategyAgent(BaseAgent):
             strategy.audience_hint = fallback.audience_hint
         if not strategy.keyword_plan:
             strategy.keyword_plan = fallback.keyword_plan
-        strategy.keyword_plan = list(dict.fromkeys(strategy.keyword_plan))[:12]
+        strategy.keyword_plan = list(dict.fromkeys(strategy.keyword_plan))[:8]
         if not strategy.tone_rules:
             strategy.tone_rules = fallback.tone_rules
-        strategy.tone_rules = list(dict.fromkeys(strategy.tone_rules))
+        strategy.tone_rules = list(dict.fromkeys(strategy.tone_rules))[:4]
+        strategy.terminology_map = {
+            key: value
+            for key, value in list((strategy.terminology_map or fallback.terminology_map).items())[:6]
+            if key and value
+        }
+        strategy.forbidden_claims = list(dict.fromkeys(strategy.forbidden_claims or fallback.forbidden_claims))[:8]
         if not strategy.summary_style:
             strategy.summary_style = fallback.summary_style
         if not strategy.revision_notes:
             strategy.revision_notes = fallback.revision_notes
-        strategy.revision_notes = list(dict.fromkeys(strategy.revision_notes))[:8]
+        strategy.revision_notes = list(dict.fromkeys(strategy.revision_notes))[:5]
         if strategy.max_experiences < 1:
             strategy.max_experiences = fallback.max_experiences
         if strategy.max_bullets_per_experience < 1:
@@ -164,6 +185,77 @@ class StrategyAgent(BaseAgent):
         if strategy.audience_hint not in {"campus", "experienced", "intern", "unknown", "general"}:
             strategy.audience_hint = fallback.audience_hint
         return strategy
+
+    def _build_llm_context(
+        self,
+        candidate_profile: CandidateProfile,
+        gap_analysis: GapAnalysis,
+        fact_cards: List[FactCard],
+        jd_profile: JDProfile,
+        language: str,
+        compact_mode: bool = False,
+    ) -> dict:
+        relevant_fact_cards = self._select_relevant_fact_cards(
+            fact_cards,
+            gap_analysis.recommended_focus + gap_analysis.strengths + jd_profile.must_have_skills,
+            limit=6 if compact_mode else 10,
+        )
+        return {
+            "compact_mode": compact_mode,
+            "language": language,
+            "jd_profile": {
+                "job_title": jd_profile.job_title,
+                "department": jd_profile.department,
+                "hiring_track": jd_profile.hiring_track,
+                "must_have_skills": jd_profile.must_have_skills[:4],
+                "nice_to_have_skills": jd_profile.nice_to_have_skills[:3],
+                "keywords": jd_profile.keywords[:6],
+                "responsibilities": jd_profile.responsibilities[:3],
+                "domain_signals": jd_profile.domain_signals[:3],
+            },
+            "gap_analysis": {
+                "fit_score_initial": gap_analysis.fit_score_initial,
+                "strengths": gap_analysis.strengths[:6],
+                "gaps": gap_analysis.gaps[:6],
+                "transferable_experiences": gap_analysis.transferable_experiences[:4],
+                "missing_keywords": gap_analysis.missing_keywords[:6],
+                "risk_points": gap_analysis.risk_points[:4],
+                "recommended_focus": gap_analysis.recommended_focus[:6],
+            },
+            "candidate_signals": {
+                "skills": {
+                    "hard_skills": candidate_profile.skills.hard_skills[:8],
+                    "tools": candidate_profile.skills.tools[:6],
+                },
+                "work_experiences": [
+                    {
+                        "company": experience.company,
+                        "title": experience.title,
+                        "achievements": experience.achievements[:2],
+                        "skills_used": experience.skills_used[:4],
+                    }
+                    for experience in candidate_profile.work_experiences[:3]
+                ],
+                "projects": [
+                    {
+                        "name": project.name,
+                        "role": project.role,
+                        "skills_used": project.skills_used[:4],
+                    }
+                    for project in candidate_profile.projects[:2]
+                ],
+                "education_count": len(candidate_profile.education),
+            },
+            "available_fact_ids": [card.id for card in relevant_fact_cards],
+            "relevant_fact_cards": [
+                {
+                    "id": card.id,
+                    "category": card.category,
+                    "text": card.text,
+                }
+                for card in relevant_fact_cards
+            ],
+        }
 
     def _rank_fact_ids(self, fact_cards: List[FactCard], priorities: List[str]) -> List[str]:
         ranked = []
@@ -175,6 +267,25 @@ class StrategyAgent(BaseAgent):
                 ranked.append((score, card.id))
         ranked.sort(key=lambda item: item[0], reverse=True)
         return [item[1] for item in ranked]
+
+    def _select_relevant_fact_cards(
+        self,
+        fact_cards: List[FactCard],
+        priorities: List[str],
+        limit: int,
+    ) -> List[FactCard]:
+        ranked_ids = self._rank_fact_ids(fact_cards, priorities)
+        id_to_card = {card.id: card for card in fact_cards}
+        selected = [id_to_card[fact_id] for fact_id in ranked_ids if fact_id in id_to_card]
+        if len(selected) < limit:
+            seen = {card.id for card in selected}
+            for card in fact_cards:
+                if card.id in seen:
+                    continue
+                selected.append(card)
+                if len(selected) >= limit:
+                    break
+        return selected[:limit]
 
     def _tone_rules(self, language: str, hiring_track: str) -> List[str]:
         if language == "zh":
