@@ -87,12 +87,90 @@
               </label>
             </div>
 
-            <button id="submit-button" type="submit" class="submit-button">生成定制简历</button>
+            <button id="submit-button" type="submit" class="submit-button">解析简历并确认</button>
           </form>
 
           <div id="request-status" class="request-status muted">
             等待上传。提交后这里会显示运行状态。
           </div>
+
+          <section id="confirmation-panel" class="confirmation-panel hidden" aria-labelledby="confirmation-title">
+            <div class="confirmation-heading">
+              <div>
+                <p class="micro-label">Fact check</p>
+                <h3 id="confirmation-title">确认候选人资料</h3>
+                <p>请修正解析错误，并确认每条事实。后续改写只会使用这里确认过的内容。</p>
+              </div>
+              <span id="confirmation-progress" class="confirmation-progress">0 / 0 已确认</span>
+            </div>
+
+            <div class="profile-review-block">
+              <h4>基本信息</h4>
+              <div class="profile-fields">
+                <label class="field compact">
+                  <span>姓名</span>
+                  <input id="candidate-name" type="text" autocomplete="name" />
+                </label>
+                <label class="field compact">
+                  <span>邮箱</span>
+                  <input id="candidate-email" type="email" autocomplete="email" />
+                </label>
+                <label class="field compact">
+                  <span>电话</span>
+                  <input id="candidate-phone" type="text" autocomplete="tel" />
+                </label>
+                <label class="field compact">
+                  <span>所在地</span>
+                  <input id="candidate-location" type="text" autocomplete="address-level2" />
+                </label>
+              </div>
+              <label class="field">
+                <span>个人摘要</span>
+                <textarea id="candidate-summary" rows="4" placeholder="只保留能够由原简历或本人确认的信息。"></textarea>
+              </label>
+            </div>
+
+            <div class="profile-review-block">
+              <h4>经历结构</h4>
+              <p class="review-help">可修正公司、岗位、时间、项目和教育信息；具体职责与成果请在事实卡中确认。</p>
+              <div id="structured-profile"></div>
+            </div>
+
+            <section id="follow-up-block" class="follow-up-block hidden">
+              <div class="facts-heading">
+                <div>
+                  <h4>补充关键信息</h4>
+                  <p class="review-help">这些问题来自 JD 与简历之间的信息缺口。可以回答、选择无法提供，或明确跳过。</p>
+                </div>
+                <span id="follow-up-progress" class="confirmation-progress">0 / 0 已处理</span>
+              </div>
+              <div id="follow-up-list" class="follow-up-list"></div>
+            </section>
+
+            <div class="facts-heading">
+              <div>
+                <h4>事实卡</h4>
+                <p class="review-help">置信度低于 80% 的内容会高亮。删除不准确的事实，或补充遗漏信息。</p>
+              </div>
+              <div class="confirmation-actions compact-actions">
+                <button id="add-fact-button" type="button" class="secondary-button">新增事实</button>
+                <button id="confirm-all-button" type="button" class="secondary-button">全部标为准确</button>
+              </div>
+            </div>
+            <div id="fact-card-list" class="fact-card-list"></div>
+
+            <div class="confirmation-consent">
+              <label>
+                <input id="profile-confirmed" type="checkbox" />
+                <span>我已核对基本信息和经历结构，并确认所有保留的事实准确。</span>
+              </label>
+            </div>
+
+            <div class="confirmation-actions">
+              <button id="back-to-upload-button" type="button" class="secondary-button">返回修改材料</button>
+              <button id="confirm-generate-button" type="button" class="submit-button" disabled>确认并生成定制简历</button>
+            </div>
+          </section>
 
           <div id="waiting-panel" class="waiting-panel hidden">
             <div class="progress-head">
@@ -148,13 +226,13 @@
           </div>
 
           <div id="result-placeholder" class="result-placeholder">
-            <p>结果区域会展示 ATS 分数、风险等级、匹配摘要、定制简历，以及 JD 复习文档和面试准备文档。</p>
+            <p>结果区域会展示 JD 匹配参考分、真实性风险、评分明细、定制简历，以及 JD 复习文档和面试准备文档。</p>
           </div>
 
           <div id="result-root" class="result-root hidden">
             <div class="metrics">
               <article class="metric-card">
-                <span>ATS 分数</span>
+                <span>JD 匹配参考分</span>
                 <strong id="ats-score">-</strong>
               </article>
               <article class="metric-card">
@@ -171,6 +249,49 @@
               </article>
             </div>
 
+            <section id="score-explanation-panel" class="subpanel score-explanation-panel">
+              <div class="score-heading">
+                <div>
+                  <h3>JD 匹配评分明细</h3>
+                  <p id="score-status" class="review-help">正在计算原简历与当前版本的分项对照…</p>
+                </div>
+                <button id="refresh-score-button" type="button" class="secondary-button">重新计算评分</button>
+              </div>
+              <p id="score-disclaimer" class="score-disclaimer">
+                JD 匹配参考分只比较当前简历与当前 JD，不代表 ATS 通过概率、面试机会或录用结果。
+              </p>
+              <div id="score-truth-banner" class="score-truth-banner"></div>
+              <div id="score-comparison" class="score-comparison"></div>
+              <div id="score-dimensions" class="score-dimensions"></div>
+              <div class="score-detail-columns">
+                <section>
+                  <h4>关键词命中与位置</h4>
+                  <div id="score-keywords" class="score-keywords"></div>
+                </section>
+                <section>
+                  <h4>计分原因与扣分项</h4>
+                  <div id="score-reasons" class="score-reasons"></div>
+                </section>
+              </div>
+            </section>
+
+            <section id="draft-diff-panel" class="subpanel draft-diff-panel">
+              <div class="diff-heading">
+                <div>
+                  <h3>原简历与定制版本对比</h3>
+                  <p id="diff-summary" class="review-help">正在生成逐条差异…</p>
+                </div>
+                <button id="refresh-diff-button" type="button" class="secondary-button">刷新对比</button>
+              </div>
+              <div class="diff-legend" aria-label="差异类型">
+                <span class="diff-badge modified">改写</span>
+                <span class="diff-badge added">新增</span>
+                <span class="diff-badge removed">删除</span>
+                <span>点击改写内容可查看事实来源；接受或拒绝会立即更新右侧编辑器。</span>
+              </div>
+              <div id="draft-diff-list" class="draft-diff-list"></div>
+            </section>
+
             <div class="result-columns">
               <section class="subpanel">
                 <h3>匹配摘要</h3>
@@ -182,10 +303,72 @@
               </section>
 
               <section class="subpanel">
-                <h3>定制简历 Markdown</h3>
-                <pre id="resume-markdown" class="markdown-output"></pre>
+                <div class="editor-heading">
+                  <div>
+                    <h3>定制简历编辑器</h3>
+                    <p id="editor-save-status" class="review-help">生成结果已保存。</p>
+                  </div>
+                  <div class="editor-actions">
+                    <button id="undo-draft-button" type="button" class="secondary-button" disabled>撤销</button>
+                    <button id="redo-draft-button" type="button" class="secondary-button" disabled>恢复</button>
+                    <button id="save-draft-button" type="button" class="secondary-button">保存版本</button>
+                  </div>
+                </div>
+
+                <div id="editor-risk-banner" class="editor-risk-banner">
+                  当前版本已完成真实性审查。
+                </div>
+
+                <div class="version-row">
+                  <label class="field compact">
+                    <span>历史版本</span>
+                    <select id="draft-version-select"></select>
+                  </label>
+                  <button id="restore-version-button" type="button" class="secondary-button">恢复此版本</button>
+                </div>
+
+                <label class="field rewrite-instruction-field">
+                  <span>局部重写要求</span>
+                  <input id="rewrite-instruction" type="text" placeholder="例如：更简洁、强调量化结果，但不要新增事实。" />
+                </label>
+
+                <div id="draft-editor" class="draft-editor"></div>
+
+                <details class="markdown-preview">
+                  <summary>查看 Markdown 预览</summary>
+                  <pre id="resume-markdown" class="markdown-output"></pre>
+                </details>
               </section>
             </div>
+
+            <section class="subpanel export-panel">
+              <div class="export-heading">
+                <div>
+                  <h3>复制与导出</h3>
+                  <p class="review-help">先预览分页，再下载单栏 ATS 友好版 DOCX 或 PDF。</p>
+                </div>
+                <div class="copy-actions">
+                  <button id="copy-plain-button" type="button" class="secondary-button">复制纯文本</button>
+                  <button id="copy-markdown-button" type="button" class="secondary-button">复制 Markdown</button>
+                </div>
+              </div>
+
+              <div class="export-controls">
+                <label class="field compact">
+                  <span>文件名</span>
+                  <input id="export-filename" type="text" maxlength="80" placeholder="例如：张三-产品经理-定制简历" />
+                </label>
+                <button id="preview-export-button" type="button" class="secondary-button">生成分页预览</button>
+                <button id="export-docx-button" type="button" class="secondary-button" disabled>下载 DOCX</button>
+                <button id="export-pdf-button" type="button" class="secondary-button" disabled>下载 PDF</button>
+              </div>
+
+              <p id="export-status" class="review-help">请先生成分页预览，确认内容没有溢出。</p>
+              <p id="export-overflow-warning" class="export-overflow-warning hidden"></p>
+              <div id="export-preview-shell" class="export-preview-shell hidden">
+                <iframe id="export-preview-frame" class="export-preview-frame" title="简历 PDF 分页预览"></iframe>
+              </div>
+            </section>
 
             <div class="result-columns">
               <section class="subpanel">

@@ -1,4 +1,5 @@
 import re
+from difflib import SequenceMatcher
 from typing import Dict, List, Optional, Tuple
 from uuid import uuid4
 
@@ -20,7 +21,7 @@ from backend.app.services.scoring.heuristics import canonicalize_skills, extract
 
 class ResumeParserAgent(BaseAgent):
     name = "resume_parser"
-    llm_metadata = {"max_tokens": 1600}
+    llm_metadata = {"max_tokens": 1600, "timeout_seconds": 75}
     GENERIC_TITLE_LINES = {"resume", "cv", "个人简历", "简历"}
     ACTION_HINTS = {
         "负责",
@@ -93,19 +94,27 @@ class ResumeParserAgent(BaseAgent):
 
         try:
             profile = self.invoke_structured(
-                context={
-                    "resume_text": resume_text,
-                    "candidate_notes": candidate_notes,
-                },
+                context=self._build_llm_context(resume_text, candidate_notes),
                 response_model=CandidateProfile,
             )
             normalized_profile = self._normalize_profile(profile, resume_text, candidate_notes)
-            fact_cards = self._build_fact_cards(normalized_profile)
+            fact_cards = self._build_fact_cards(normalized_profile, resume_text)
             if not self._has_minimum_signal(normalized_profile, fact_cards):
                 raise StructuredLLMError("Resume parser returned insufficient structured signal.")
             return normalized_profile, fact_cards
         except StructuredLLMError as exc:
-            return self.fallback_on_error(exc, (fallback_profile, fallback_fact_cards))
+            try:
+                compact_profile = self.invoke_structured(
+                    context=self._build_llm_context(resume_text, candidate_notes, compact_mode=True),
+                    response_model=CandidateProfile,
+                )
+                normalized_profile = self._normalize_profile(compact_profile, resume_text, candidate_notes)
+                fact_cards = self._build_fact_cards(normalized_profile, resume_text)
+                if not self._has_minimum_signal(normalized_profile, fact_cards):
+                    raise StructuredLLMError("Resume parser compact mode returned insufficient structured signal.")
+                return normalized_profile, fact_cards
+            except StructuredLLMError:
+                return self.fallback_on_error(exc, (fallback_profile, fallback_fact_cards))
 
     def _run_fallback(self, resume_text: str, candidate_notes: str = "") -> Tuple[CandidateProfile, List[FactCard]]:
         normalized_text = self._normalize_text(resume_text)
@@ -137,7 +146,7 @@ class ResumeParserAgent(BaseAgent):
             skills=skills,
             certifications=certifications,
         )
-        fact_cards = self._build_fact_cards(profile)
+        fact_cards = self._build_fact_cards(profile, resume_text)
         return profile, fact_cards
 
     def _normalize_profile(
@@ -167,6 +176,32 @@ class ResumeParserAgent(BaseAgent):
 
     def _has_minimum_signal(self, profile: CandidateProfile, fact_cards: List[FactCard]) -> bool:
         return bool(profile.work_experiences or profile.projects or profile.skills.hard_skills or fact_cards)
+
+    def _build_llm_context(
+        self,
+        resume_text: str,
+        candidate_notes: str,
+        compact_mode: bool = False,
+    ) -> Dict[str, str]:
+        normalized_text = self._normalize_text(resume_text)
+        excerpt_limit = 3600 if compact_mode else 9000
+        return {
+            "compact_mode": compact_mode,
+            "resume_text": self._truncate_resume_text(normalized_text, excerpt_limit),
+            "candidate_notes": candidate_notes.strip(),
+        }
+
+    def _truncate_resume_text(self, text: str, max_chars: int) -> str:
+        stripped = (text or "").strip()
+        if len(stripped) <= max_chars:
+            return stripped
+        head_limit = int(max_chars * 0.7)
+        tail_limit = max_chars - head_limit - len("\n...\n")
+        head = stripped[:head_limit].rstrip()
+        tail = stripped[-tail_limit:].lstrip() if tail_limit > 0 else ""
+        if not tail:
+            return head
+        return "{0}\n...\n{1}".format(head, tail)
 
     def _normalize_text(self, text: str) -> str:
         text = text.replace("\r\n", "\n").replace("\r", "\n")
@@ -347,59 +382,102 @@ class ResumeParserAgent(BaseAgent):
                     break
         return company, title
 
-    def _build_fact_cards(self, profile: CandidateProfile) -> List[FactCard]:
+    def _build_fact_cards(self, profile: CandidateProfile, resume_text: str = "") -> List[FactCard]:
         fact_cards: List[FactCard] = []
         for experience in profile.work_experiences:
             for index, bullet in enumerate(experience.bullets, start=1):
+                source_excerpt, confidence = self._find_source_evidence(bullet, resume_text)
                 fact_cards.append(
                     FactCard(
                         id="fact_{0}".format(uuid4().hex[:10]),
                         category="work_bullet",
                         text=bullet,
                         source_span="work_experiences.{0}.bullets.{1}".format(experience.id, index),
+                        source_excerpt=source_excerpt,
+                        evidence_level="explicit" if confidence >= 0.8 else "needs_review",
+                        confidence=confidence,
                     )
                 )
         for project in profile.projects:
             for index, bullet in enumerate(project.bullets, start=1):
+                source_excerpt, confidence = self._find_source_evidence(bullet, resume_text)
                 fact_cards.append(
                     FactCard(
                         id="fact_{0}".format(uuid4().hex[:10]),
                         category="project_bullet",
                         text=bullet,
                         source_span="projects.{0}.bullets.{1}".format(project.id, index),
+                        source_excerpt=source_excerpt,
+                        evidence_level="explicit" if confidence >= 0.8 else "needs_review",
+                        confidence=confidence,
                     )
                 )
         for skill in profile.skills.hard_skills + profile.skills.tools:
+            source_excerpt, confidence = self._find_source_evidence(skill, resume_text)
             fact_cards.append(
                 FactCard(
                     id="fact_{0}".format(uuid4().hex[:10]),
                     category="skill",
                     text=skill,
                     source_span="skills",
+                    source_excerpt=source_excerpt,
+                    evidence_level="explicit" if confidence >= 0.8 else "needs_review",
+                    confidence=confidence,
                 )
             )
         for education in profile.education:
             education_parts = [education.school, education.degree or "", education.field_of_study or ""]
             education_text = " | ".join(part for part in education_parts if part)
             if education_text:
+                source_excerpt, confidence = self._find_source_evidence(education_text, resume_text)
                 fact_cards.append(
                     FactCard(
                         id="fact_{0}".format(uuid4().hex[:10]),
                         category="education",
                         text=education_text,
                         source_span="education.{0}".format(education.id),
+                        source_excerpt=source_excerpt,
+                        evidence_level="explicit" if confidence >= 0.8 else "needs_review",
+                        confidence=confidence,
                     )
                 )
         for index, certification in enumerate(profile.certifications, start=1):
+            source_excerpt, confidence = self._find_source_evidence(certification, resume_text)
             fact_cards.append(
                 FactCard(
                     id="fact_{0}".format(uuid4().hex[:10]),
                     category="certification",
                     text=certification,
                     source_span="certifications.{0}".format(index),
+                    source_excerpt=source_excerpt,
+                    evidence_level="explicit" if confidence >= 0.8 else "needs_review",
+                    confidence=confidence,
                 )
             )
         return fact_cards
+
+    def _find_source_evidence(self, fact_text: str, resume_text: str) -> Tuple[str, float]:
+        normalized_fact = re.sub(r"\s+", " ", (fact_text or "").strip()).lower()
+        source_lines = [line.strip() for line in self._normalize_text(resume_text).splitlines() if line.strip()]
+        if not normalized_fact or not source_lines:
+            return "", 0.55
+
+        for line in source_lines:
+            normalized_line = re.sub(r"\s+", " ", self._strip_bullet(line)).lower()
+            if normalized_fact in normalized_line or normalized_line in normalized_fact:
+                return line, 0.98
+
+        best_line = ""
+        best_ratio = 0.0
+        for line in source_lines:
+            normalized_line = re.sub(r"\s+", " ", self._strip_bullet(line)).lower()
+            ratio = SequenceMatcher(None, normalized_fact, normalized_line).ratio()
+            if ratio > best_ratio:
+                best_line = line
+                best_ratio = ratio
+        if best_ratio >= 0.55:
+            return best_line, round(min(0.79, max(0.6, best_ratio)), 2)
+        return "", 0.55
 
     def _candidate_name_lines(self, text: str) -> List[str]:
         candidates: List[str] = []

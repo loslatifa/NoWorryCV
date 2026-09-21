@@ -20,6 +20,7 @@ from backend.app.schemas.prep import JDReviewDocument
 from backend.app.schemas.review import ReviewBundle
 from backend.app.schemas.run_state import TailorRunInput, TailorRunResult, TailorRunState
 from backend.app.schemas.strategy import FinalResumePackage
+from backend.app.services.follow_up_questions import build_follow_up_questions
 
 
 class ResumeTailorOrchestrator:
@@ -48,6 +49,33 @@ class ResumeTailorOrchestrator:
             force_fallback=self._prefer_fast_mode(payload),
         )
         return profile
+
+    def parse_resume_with_facts(self, payload: TailorRunInput):
+        return self.resume_parser.run(
+            payload.resume_text,
+            payload.candidate_notes,
+            force_fallback=self._prefer_fast_mode(payload),
+        )
+
+    def prepare_confirmation(self, payload: TailorRunInput):
+        candidate_profile, fact_cards = self.parse_resume_with_facts(payload)
+        jd_profile = self.jd_analyst.run(
+            payload.jd_text,
+            force_fallback=self._prefer_fast_mode(payload),
+        )
+        gap_analysis = self.gap_analysis.run(
+            candidate_profile,
+            fact_cards,
+            jd_profile,
+            force_fallback=self._prefer_fast_mode(payload),
+        )
+        follow_up_questions = build_follow_up_questions(
+            candidate_profile,
+            fact_cards,
+            jd_profile,
+            gap_analysis,
+        )
+        return candidate_profile, fact_cards, jd_profile, gap_analysis, follow_up_questions
 
     def analyze_jd(self, payload: TailorRunInput) -> JDProfile:
         jd_profile = self.jd_analyst.run(payload.jd_text, force_fallback=self._prefer_fast_mode(payload))
@@ -123,10 +151,13 @@ class ResumeTailorOrchestrator:
         state = TailorRunState.model_validate(raw_state)
         self._report_progress("analyze_jd", 10, "正在分析 JD 结构与岗位要求。")
         started_at = time.perf_counter()
-        jd_profile = self.jd_analyst.run(
-            state.input.jd_text,
-            force_fallback=self._prefer_fast_mode(state.input),
-        )
+        if state.input.preanalyzed_jd_profile is not None:
+            jd_profile = state.input.preanalyzed_jd_profile.model_copy(deep=True)
+        else:
+            jd_profile = self.jd_analyst.run(
+                state.input.jd_text,
+                force_fallback=self._prefer_fast_mode(state.input),
+            )
         state.jd_profile = jd_profile
         if state.input.output_language == "auto":
             state.resolved_language = jd_profile.language or state.resolved_language
@@ -137,7 +168,7 @@ class ResumeTailorOrchestrator:
                 "Parsed JD into structured profile.",
                 {
                     "keyword_count": str(len(jd_profile.keywords)),
-                    "provider": self.jd_analyst.llm_service.provider_name,
+                    "provider": "preanalyzed" if state.input.preanalyzed_jd_profile is not None else self.jd_analyst.llm_service.provider_name,
                     "elapsed_ms": str(int((time.perf_counter() - started_at) * 1000)),
                 },
             )
@@ -198,13 +229,23 @@ class ResumeTailorOrchestrator:
 
     def _parse_resume_node(self, raw_state: Dict) -> Dict:
         state = TailorRunState.model_validate(raw_state)
-        self._report_progress("parse_resume", 38, "正在解析简历并抽取事实卡片。")
-        started_at = time.perf_counter()
-        candidate_profile, fact_cards = self.resume_parser.run(
-            state.input.resume_text,
-            state.input.candidate_notes,
-            force_fallback=self._prefer_fast_mode(state.input),
+        has_confirmed_profile = state.input.confirmed_candidate_profile is not None
+        self._report_progress(
+            "parse_resume",
+            38,
+            "正在载入已确认的候选人资料。" if has_confirmed_profile else "正在解析简历并抽取事实卡片。",
         )
+        started_at = time.perf_counter()
+        if has_confirmed_profile:
+            candidate_profile = state.input.confirmed_candidate_profile.model_copy(deep=True)
+            fact_cards = [card.model_copy(deep=True) for card in state.input.confirmed_fact_cards]
+            self._apply_confirmed_facts_to_profile(candidate_profile, fact_cards)
+        else:
+            candidate_profile, fact_cards = self.resume_parser.run(
+                state.input.resume_text,
+                state.input.candidate_notes,
+                force_fallback=self._prefer_fast_mode(state.input),
+            )
         state.candidate_profile = candidate_profile
         state.fact_cards = fact_cards
         if state.resolved_language == "auto":
@@ -214,13 +255,57 @@ class ResumeTailorOrchestrator:
                 "Parsed resume into candidate profile and fact cards.",
                 {
                     "fact_count": str(len(fact_cards)),
-                    "provider": self.resume_parser.llm_service.provider_name,
+                    "provider": "user_confirmed" if has_confirmed_profile else self.resume_parser.llm_service.provider_name,
                     "elapsed_ms": str(int((time.perf_counter() - started_at) * 1000)),
                 },
             )
         )
-        self._report_progress("parse_resume", 44, "已完成简历解析，正在匹配经历与 JD。")
+        self._report_progress(
+            "parse_resume",
+            44,
+            "已载入确认资料，正在匹配经历与 JD。" if has_confirmed_profile else "已完成简历解析，正在匹配经历与 JD。",
+        )
         return state.model_dump(mode="json")
+
+    def _apply_confirmed_facts_to_profile(self, candidate_profile, fact_cards) -> None:
+        """Keep editable profile sections aligned with the user-confirmed fact set."""
+        for experience in candidate_profile.work_experiences:
+            prefix = "work_experiences.{0}.bullets.".format(experience.id)
+            experience.bullets = [card.text for card in fact_cards if card.source_span.startswith(prefix)]
+            experience.achievements = [
+                bullet for bullet in experience.bullets if any(character.isdigit() for character in bullet)
+            ]
+
+        for project in candidate_profile.projects:
+            prefix = "projects.{0}.bullets.".format(project.id)
+            project.bullets = [card.text for card in fact_cards if card.source_span.startswith(prefix)]
+
+        confirmed_skills = [card.text for card in fact_cards if card.category == "skill"]
+        original_tools = {tool.strip().lower() for tool in candidate_profile.skills.tools}
+        candidate_profile.skills.tools = [skill for skill in confirmed_skills if skill.strip().lower() in original_tools]
+        candidate_profile.skills.hard_skills = [
+            skill for skill in confirmed_skills if skill.strip().lower() not in original_tools
+        ]
+        candidate_profile.certifications = [
+            card.text for card in fact_cards if card.category == "certification"
+        ]
+
+        supplemental_facts = [
+            card
+            for card in fact_cards
+            if card.source_type == "user"
+            and card.source_span.startswith(("follow_up.", "user_added"))
+        ]
+        for card in supplemental_facts:
+            if card.category == "project_bullet" and candidate_profile.projects:
+                candidate_profile.projects[0].bullets.append(card.text)
+            elif card.category in {"work_bullet", "achievement"} and candidate_profile.work_experiences:
+                candidate_profile.work_experiences[0].bullets.append(card.text)
+            elif card.category == "general":
+                if candidate_profile.work_experiences:
+                    candidate_profile.work_experiences[0].bullets.append(card.text)
+                elif candidate_profile.projects:
+                    candidate_profile.projects[0].bullets.append(card.text)
 
     def _gap_analysis_node(self, raw_state: Dict) -> Dict:
         state = TailorRunState.model_validate(raw_state)
@@ -299,7 +384,7 @@ class ResumeTailorOrchestrator:
         self._report_progress(
             "rewrite",
             min(85, 74 + state.current_iteration * 5),
-            "已生成第 {0} 版草稿，正在审查真实性与 ATS。".format(state.current_iteration),
+            "已生成第 {0} 版草稿，正在审查真实性与 JD 匹配度。".format(state.current_iteration),
         )
         return state.model_dump(mode="json")
 
@@ -308,12 +393,12 @@ class ResumeTailorOrchestrator:
         self._report_progress(
             "review",
             min(90, 80 + state.current_iteration * 3),
-            "正在审查真实性、ATS 和文案质量。",
+            "正在审查真实性、JD 匹配度和文案质量。",
         )
         started_at = time.perf_counter()
         draft = state.drafts[-1]
         compliance_report = self.compliance_agent.run(draft, state.fact_cards)
-        ats_report = self.ats_agent.run(draft, state.jd_profile)
+        ats_report = self.ats_agent.run(draft, state.jd_profile, compliance_report)
         critic_report = self.critic_agent.run(
             draft,
             state.jd_profile,
@@ -447,14 +532,14 @@ class ResumeTailorOrchestrator:
         latest_review = state.reviews[-1]
         if language == "zh":
             change_log = self._build_change_log(state)
-            fit_summary = "当前版本 ATS 评分 {0}，初始匹配度 {1}，招聘类型识别为 {2}。".format(
+            fit_summary = "当前版本 JD 匹配参考分 {0}，初始匹配度 {1}，招聘类型识别为 {2}。".format(
                 latest_review.ats_report.score,
                 state.gap_analysis.fit_score_initial,
                 self._humanize_hiring_track(state.jd_profile.hiring_track),
             )
         else:
             change_log = self._build_change_log(state)
-            fit_summary = "ATS score is {0}; initial fit score was {1}; hiring track was detected as {2}.".format(
+            fit_summary = "The current JD match reference score is {0}; initial fit score was {1}; hiring track was detected as {2}.".format(
                 latest_review.ats_report.score,
                 state.gap_analysis.fit_score_initial,
                 state.jd_profile.hiring_track or "unknown",
@@ -484,6 +569,7 @@ class ResumeTailorOrchestrator:
             jd_profile=state.jd_profile,
             gap_analysis=state.gap_analysis,
             rewrite_strategy=state.rewrite_strategy,
+            fact_cards=state.fact_cards,
             drafts=state.drafts,
             reviews=state.reviews,
             final_package=state.final_package,
@@ -536,7 +622,7 @@ class ResumeTailorOrchestrator:
             return [
                 "Prioritized the most relevant verified skills and experience for the JD.",
                 "Kept traceability anchored to source facts to avoid unsupported claims.",
-                "Applied ATS and critic feedback during the optimization loop.",
+                "Applied JD match scoring and critic feedback during the optimization loop.",
             ]
 
         track = state.jd_profile.hiring_track
@@ -555,5 +641,5 @@ class ResumeTailorOrchestrator:
         return [
             "已优先突出与 JD 重合度更高的真实技能与经历。",
             "已保留基于原始事实的 traceability，避免虚构或越界扩写。",
-            "已结合 ATS 结果与 critic 建议进行自动优化。",
+            "已结合 JD 匹配结果与 critic 建议进行自动优化。",
         ]

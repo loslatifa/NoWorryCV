@@ -9,8 +9,10 @@ class FactCard(BaseModel):
     text: str
     source_type: str = "resume"
     source_span: str = ""
+    source_excerpt: str = ""
     evidence_level: str = "explicit"
     confidence: float = Field(default=1.0, ge=0.0, le=1.0)
+    confirmed: bool = False
     allowed_operations: List[str] = Field(
         default_factory=lambda: ["rewrite", "reorder", "highlight"]
     )
@@ -25,4 +27,3 @@ class AgentExecutionRecord(BaseModel):
     agent_name: str
     summary: str
     metadata: Dict[str, str] = Field(default_factory=dict)
-

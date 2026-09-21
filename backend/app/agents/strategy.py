@@ -8,7 +8,7 @@ from backend.app.schemas.common import FactCard
 from backend.app.schemas.jd import JDProfile
 from backend.app.schemas.review import CriticReport
 from backend.app.schemas.strategy import GapAnalysis, RewriteStrategy
-from backend.app.services.scoring.heuristics import normalize_token
+from backend.app.services.scoring.heuristics import normalize_token, unique_preserve_order
 
 
 class StrategyAgent(BaseAgent):
@@ -40,7 +40,10 @@ class StrategyAgent(BaseAgent):
                 ),
                 response_model=RewriteStrategy,
             )
-            return self._normalize_strategy(strategy, fact_cards, fallback)
+            normalized = self._normalize_strategy(strategy, fact_cards, fallback)
+            if self._is_strategy_under_specified(normalized, fallback):
+                raise StructuredLLMError("Strategy output was structurally valid but under-specified.")
+            return normalized
         except StructuredLLMError as exc:
             try:
                 compact_strategy = self.invoke_structured(
@@ -54,7 +57,10 @@ class StrategyAgent(BaseAgent):
                     ),
                     response_model=RewriteStrategy,
                 )
-                return self._normalize_strategy(compact_strategy, fact_cards, fallback)
+                normalized = self._normalize_strategy(compact_strategy, fact_cards, fallback)
+                if self._is_strategy_under_specified(normalized, fallback):
+                    return fallback
+                return normalized
             except StructuredLLMError:
                 return self.fallback_on_error(exc, fallback)
 
@@ -66,7 +72,14 @@ class StrategyAgent(BaseAgent):
         jd_profile: JDProfile,
         language: str,
     ) -> RewriteStrategy:
-        emphasize_fact_ids = self._rank_fact_ids(fact_cards, gap_analysis.recommended_focus)
+        priorities = unique_preserve_order(
+            jd_profile.must_have_skills
+            + jd_profile.domain_signals
+            + gap_analysis.recommended_focus
+            + gap_analysis.strengths
+            + jd_profile.keywords[:4]
+        )
+        emphasize_fact_ids = self._rank_fact_ids(fact_cards, priorities)
         hiring_track = getattr(jd_profile, "hiring_track", "unknown")
         is_campus_like = hiring_track in {"campus", "intern"}
         has_projects = bool(candidate_profile.projects)
@@ -77,8 +90,13 @@ class StrategyAgent(BaseAgent):
             section_priority=self._section_priority_for_track(hiring_track),
             emphasize_fact_ids=emphasize_fact_ids[:12],
             deemphasize_fact_ids=[card.id for card in fact_cards if card.id not in emphasize_fact_ids][:12],
-            keyword_plan=(gap_analysis.strengths + gap_analysis.missing_keywords[:3])[:8],
-            terminology_map={token: token for token in gap_analysis.strengths[:8]},
+            keyword_plan=unique_preserve_order(
+                jd_profile.must_have_skills
+                + gap_analysis.strengths
+                + jd_profile.domain_signals
+                + gap_analysis.missing_keywords[:2]
+            )[:8],
+            terminology_map={token: token for token in unique_preserve_order(jd_profile.must_have_skills + gap_analysis.strengths)[:8]},
             tone_rules=self._tone_rules(language, hiring_track),
             forbidden_claims=gap_analysis.missing_keywords[:8],
             max_experiences=3 if is_campus_like else 4,
@@ -257,12 +275,34 @@ class StrategyAgent(BaseAgent):
             ],
         }
 
+    def _is_strategy_under_specified(self, strategy: RewriteStrategy, fallback: RewriteStrategy) -> bool:
+        if fallback.emphasize_fact_ids and len(strategy.emphasize_fact_ids) < min(2, len(fallback.emphasize_fact_ids)):
+            return True
+        if fallback.keyword_plan and len(strategy.keyword_plan) < min(2, len(fallback.keyword_plan)):
+            return True
+        if fallback.revision_notes and len(strategy.revision_notes) < 1:
+            return True
+        if fallback.include_projects and not strategy.include_projects:
+            return True
+        if fallback.summary_style != "balanced" and strategy.summary_style == "balanced":
+            return True
+        if strategy.max_experiences < fallback.max_experiences:
+            return True
+        if strategy.max_bullets_per_experience < fallback.max_bullets_per_experience:
+            return True
+        return False
+
     def _rank_fact_ids(self, fact_cards: List[FactCard], priorities: List[str]) -> List[str]:
         ranked = []
         lowered = [normalize_token(item) for item in priorities]
+        weighted_priorities = {
+            item: max(1, len(lowered) - index)
+            for index, item in enumerate(lowered)
+            if item
+        }
         for card in fact_cards:
             text = normalize_token(card.text)
-            score = sum(1 for item in lowered if item and item in text)
+            score = sum(weighted_priorities[item] for item in lowered if item and item in text)
             if score > 0:
                 ranked.append((score, card.id))
         ranked.sort(key=lambda item: item[0], reverse=True)

@@ -1,6 +1,7 @@
 import json
+import re
 from functools import lru_cache
-from typing import Any, Dict, Optional, Type, TypeVar
+from typing import Any, Dict, List, Optional, Type, TypeVar
 
 from pydantic import BaseModel, ValidationError
 
@@ -73,8 +74,16 @@ class StructuredLLMService:
                     user_prompt=user_prompt,
                     metadata=provider_metadata,
                 )
-                payload = self._extract_json(raw_output)
-                return response_model.model_validate_json(payload)
+                payload_candidates = self._extract_json_candidates(raw_output)
+                validation_error: Optional[Exception] = None
+                for payload in payload_candidates:
+                    try:
+                        return response_model.model_validate_json(payload)
+                    except (ValidationError, ValueError, json.JSONDecodeError) as exc:
+                        validation_error = exc
+                if validation_error is not None:
+                    raise validation_error
+                raise ValueError("Provider did not return a JSON object.")
             except (ValidationError, ValueError, json.JSONDecodeError, RuntimeError, Exception) as exc:
                 last_error = exc
                 if response_format == "json_schema":
@@ -110,16 +119,116 @@ class StructuredLLMService:
         return value
 
     def _extract_json(self, text: str) -> str:
+        candidates = self._extract_json_candidates(text)
+        if not candidates:
+            raise ValueError("Provider did not return a JSON object.")
+        return candidates[0]
+
+    def _extract_json_candidates(self, text: str) -> List[str]:
         stripped = text.strip()
+        variants = [stripped]
         if stripped.startswith("```"):
             lines = stripped.splitlines()
             if len(lines) >= 3:
-                stripped = "\n".join(lines[1:-1]).strip()
-        start = stripped.find("{")
-        end = stripped.rfind("}")
-        if start == -1 or end == -1 or end < start:
+                variants.append("\n".join(lines[1:-1]).strip())
+
+        candidates: List[str] = []
+        seen = set()
+        for variant in variants:
+            fragment = self._extract_balanced_json_fragment(variant)
+            if fragment and fragment not in seen:
+                seen.add(fragment)
+                candidates.append(fragment)
+
+            repaired = self._repair_partial_json_fragment(variant)
+            if repaired and repaired not in seen:
+                seen.add(repaired)
+                candidates.append(repaired)
+
+        if not candidates:
             raise ValueError("Provider did not return a JSON object.")
-        return stripped[start : end + 1]
+        return candidates
+
+    def _extract_balanced_json_fragment(self, text: str) -> Optional[str]:
+        start = text.find("{")
+        if start == -1:
+            return None
+        stack: List[str] = []
+        in_string = False
+        escape = False
+        for index in range(start, len(text)):
+            char = text[index]
+            if in_string:
+                if escape:
+                    escape = False
+                elif char == "\\":
+                    escape = True
+                elif char == '"':
+                    in_string = False
+                continue
+
+            if char == '"':
+                in_string = True
+                continue
+            if char in "{[":
+                stack.append(char)
+                continue
+            if char in "}]":
+                if not stack:
+                    break
+                opener = stack[-1]
+                if (opener == "{" and char == "}") or (opener == "[" and char == "]"):
+                    stack.pop()
+                    if not stack:
+                        return text[start : index + 1].strip()
+                else:
+                    break
+        return None
+
+    def _repair_partial_json_fragment(self, text: str) -> Optional[str]:
+        start = text.find("{")
+        if start == -1:
+            return None
+        fragment = text[start:].strip()
+        if not fragment:
+            return None
+
+        stack: List[str] = []
+        in_string = False
+        escape = False
+        for char in fragment:
+            if in_string:
+                if escape:
+                    escape = False
+                elif char == "\\":
+                    escape = True
+                elif char == '"':
+                    in_string = False
+                continue
+
+            if char == '"':
+                in_string = True
+                continue
+            if char in "{[":
+                stack.append(char)
+            elif char in "}]":
+                if not stack:
+                    break
+                opener = stack[-1]
+                if (opener == "{" and char == "}") or (opener == "[" and char == "]"):
+                    stack.pop()
+                else:
+                    break
+
+        if not stack and fragment.endswith("}"):
+            return None
+
+        repaired = fragment.rstrip()
+        repaired = repaired.rstrip(",")
+        closing = "".join("}" if opener == "{" else "]" for opener in reversed(stack))
+        repaired = repaired + closing
+        repaired = re.sub(r",(\s*[}\]])", r"\1", repaired)
+        return repaired.strip()
 
 
 @lru_cache

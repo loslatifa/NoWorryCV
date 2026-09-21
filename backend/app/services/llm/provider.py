@@ -55,6 +55,7 @@ class OpenAICompatibleProvider:
 
     def complete(self, system_prompt: str, user_prompt: str, metadata: Optional[Dict[str, Any]] = None) -> str:
         metadata = metadata or {}
+        timeout_seconds = float(metadata.get("timeout_seconds", self.timeout_seconds))
         payload: Dict[str, Any] = {
             "model": self.model,
             "messages": [
@@ -93,7 +94,7 @@ class OpenAICompatibleProvider:
         last_error: Optional[httpx.ConnectError] = None
         for attempt in range(1, connect_retries + 1):
             try:
-                with httpx.Client(timeout=self.timeout_seconds) as client:
+                with httpx.Client(timeout=timeout_seconds) as client:
                     response = client.post(
                         "{0}/chat/completions".format(self.base_url),
                         headers=headers,

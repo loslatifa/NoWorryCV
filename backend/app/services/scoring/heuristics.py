@@ -100,7 +100,11 @@ def canonicalize_skills(skills: Iterable[str]) -> List[str]:
 
 def extract_known_skills(text: str) -> List[str]:
     lower_text = text.lower()
-    matches = [SKILL_CANONICAL_MAP.get(skill, skill) for skill in KNOWN_SKILLS if skill in lower_text]
+    matches = [
+        SKILL_CANONICAL_MAP.get(skill, skill)
+        for skill in SKILL_CANONICAL_MAP
+        if skill in lower_text
+    ]
     return unique_preserve_order(matches)
 
 

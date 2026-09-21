@@ -2,6 +2,7 @@ from typing import List, Optional
 
 from pydantic import BaseModel, Field
 
+
 class TraceableBullet(BaseModel):
     text: str
     fact_ids: List[str] = Field(default_factory=list)
@@ -64,3 +65,9 @@ class InterviewPrepDocumentStructuredOutput(BaseModel):
     behavioral_questions: List[str] = Field(default_factory=list)
     risk_alerts: List[str] = Field(default_factory=list)
     answer_framework: List[str] = Field(default_factory=list)
+
+
+class PartialRewriteOutput(BaseModel):
+    replacement_text: str = ""
+    replacement_items: List[str] = Field(default_factory=list)
+    fact_ids: List[str] = Field(default_factory=list)

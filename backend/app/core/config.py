@@ -1,4 +1,5 @@
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -18,6 +19,7 @@ class Settings(BaseSettings):
     llm_max_retries: int = 2
     llm_response_format: str = "json_schema"
     llm_strict_mode: bool = True
+    run_store_path: str = str(Path(".dist") / "run_store.json")
     qwen_api_key: str = Field(
         default="",
         validation_alias=AliasChoices("QWEN_API_KEY", "DASHSCOPE_API_KEY"),

@@ -7,8 +7,17 @@ from backend.app.schemas.candidate import CandidateProfile
 from backend.app.schemas.common import AgentExecutionRecord, FactCard
 from backend.app.schemas.jd import JDProfile, KnowledgeReviewCard
 from backend.app.schemas.prep import InterviewPrepDocument, JDReviewDocument
-from backend.app.schemas.review import ReviewBundle
+from backend.app.schemas.review import ATSReport, ComplianceReport, ReviewBundle
 from backend.app.schemas.strategy import FinalResumePackage, GapAnalysis, ResumeDraft, RewriteStrategy
+
+
+class FollowUpQuestion(BaseModel):
+    id: str
+    prompt: str
+    reason: str = ""
+    priority: str = "optional"
+    suggested_category: str = "general"
+    related_keywords: List[str] = Field(default_factory=list)
 
 
 class TailorRunInput(BaseModel):
@@ -18,6 +27,9 @@ class TailorRunInput(BaseModel):
     output_language: str = "auto"
     max_iterations: int = 2
     processing_mode: str = "full"
+    confirmed_candidate_profile: Optional[CandidateProfile] = None
+    confirmed_fact_cards: List[FactCard] = Field(default_factory=list)
+    preanalyzed_jd_profile: Optional[JDProfile] = None
 
     @field_validator("max_iterations")
     @classmethod
@@ -56,6 +68,16 @@ class TailorRunState(BaseModel):
     execution_log: List[AgentExecutionRecord] = Field(default_factory=list)
 
 
+class DraftVersion(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid4()))
+    created_at: str
+    source: str = "manual"
+    label: str = "已保存版本"
+    draft: ResumeDraft
+    compliance_report: ComplianceReport
+    ats_report: ATSReport
+
+
 class TailorRunResult(BaseModel):
     run_id: str
     status: str
@@ -65,9 +87,11 @@ class TailorRunResult(BaseModel):
     jd_profile: JDProfile
     gap_analysis: GapAnalysis
     rewrite_strategy: RewriteStrategy
+    fact_cards: List[FactCard] = Field(default_factory=list)
     drafts: List[ResumeDraft]
     reviews: List[ReviewBundle]
     final_package: FinalResumePackage
+    draft_versions: List[DraftVersion] = Field(default_factory=list)
 
 
 class TailorRunJobStatus(BaseModel):
@@ -79,3 +103,30 @@ class TailorRunJobStatus(BaseModel):
     error_message: str = ""
     review_cards: List[KnowledgeReviewCard] = Field(default_factory=list)
     result: Optional[TailorRunResult] = None
+
+
+class ResumeParsePreview(BaseModel):
+    resume_text: str
+    candidate_profile: CandidateProfile
+    fact_cards: List[FactCard] = Field(default_factory=list)
+    jd_profile: Optional[JDProfile] = None
+    gap_analysis: Optional[GapAnalysis] = None
+    follow_up_questions: List[FollowUpQuestion] = Field(default_factory=list)
+
+
+class DraftSaveRequest(BaseModel):
+    draft: ResumeDraft
+    label: str = "手工保存"
+
+
+class PartialRewriteRequest(BaseModel):
+    draft: ResumeDraft
+    target_type: str
+    section_index: Optional[int] = None
+    item_index: Optional[int] = None
+    instruction: str = ""
+
+
+class DraftMutationResponse(BaseModel):
+    version: DraftVersion
+    versions: List[DraftVersion] = Field(default_factory=list)

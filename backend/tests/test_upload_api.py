@@ -35,6 +35,137 @@ def test_upload_endpoint_accepts_markdown_resume(monkeypatch) -> None:
     assert payload["final_package"]["interview_prep_doc"]["markdown"]
 
 
+def test_parse_upload_returns_editable_unconfirmed_facts(monkeypatch) -> None:
+    monkeypatch.setenv("LLM_PROVIDER", "stub")
+    app = create_app()
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/v1/resume/parse-upload",
+        files={
+            "resume_file": (
+                "resume.md",
+                "# Resume\n\n张三\n\n项目经历\n增长实验项目\n- 使用 SQL 复盘实验结果\n\n技能\nSQL".encode("utf-8"),
+                "text/markdown",
+            )
+        },
+        data={
+            "candidate_notes": "希望强调数据分析",
+            "jd_text": "产品经理\n要求：SQL、用户研究、A/B Testing",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["resume_text"]
+    assert payload["candidate_profile"]["basics"]["name"] == "张三"
+    assert payload["fact_cards"]
+    assert all(card["confirmed"] is False for card in payload["fact_cards"])
+    assert all(card["source_excerpt"] for card in payload["fact_cards"])
+    assert payload["jd_profile"] is not None
+    assert payload["gap_analysis"] is not None
+    assert 1 <= len(payload["follow_up_questions"]) <= 5
+    assert all(question["prompt"] for question in payload["follow_up_questions"])
+
+
+def test_confirmed_job_rejects_unconfirmed_facts(monkeypatch) -> None:
+    monkeypatch.setenv("LLM_PROVIDER", "stub")
+    app = create_app()
+    client = TestClient(app)
+    parsed = client.post(
+        "/api/v1/resume/parse-upload",
+        files={
+            "resume_file": (
+                "resume.md",
+                "张三\n\n项目经历\n增长实验项目\n- 使用 SQL 复盘实验结果\n\n技能\nSQL".encode("utf-8"),
+                "text/markdown",
+            )
+        },
+    ).json()
+
+    response = client.post(
+        "/api/v1/tailor-runs/confirmed-jobs",
+        json={
+            "resume_text": parsed["resume_text"],
+            "jd_text": "产品经理\n要求：SQL，数据分析",
+            "output_language": "zh",
+            "max_iterations": 1,
+            "confirmed_candidate_profile": parsed["candidate_profile"],
+            "confirmed_fact_cards": parsed["fact_cards"],
+        },
+    )
+
+    assert response.status_code == 400
+    assert "must be confirmed" in response.json()["detail"]
+
+
+def test_confirmed_job_uses_user_corrected_profile_and_facts(monkeypatch) -> None:
+    monkeypatch.setenv("LLM_PROVIDER", "stub")
+    app = create_app()
+    client = TestClient(app)
+    parsed = client.post(
+        "/api/v1/resume/parse-upload",
+        files={
+            "resume_file": (
+                "resume.md",
+                "张三\n\n项目经历\n增长实验项目\n- 使用 SQL 复盘实验结果\n\n技能\nSQL".encode("utf-8"),
+                "text/markdown",
+            )
+        },
+    ).json()
+
+    parsed["candidate_profile"]["basics"]["name"] = "李四"
+    project_fact = next(card for card in parsed["fact_cards"] if card["category"] == "project_bullet")
+    project_fact["text"] = "使用 SQL 复盘增长实验，并沉淀分析结论"
+    for fact in parsed["fact_cards"]:
+        fact["confirmed"] = True
+    parsed["fact_cards"].append(
+        {
+            "id": "fact_follow_up_project_role",
+            "category": "project_bullet",
+            "text": "独立负责实验数据清洗、分析与结论汇报",
+            "source_type": "user",
+            "source_span": "follow_up.project_role",
+            "source_excerpt": "你在项目中具体负责哪一部分？",
+            "evidence_level": "user_confirmed",
+            "confidence": 1,
+            "confirmed": True,
+            "allowed_operations": ["rewrite", "reorder", "highlight"],
+        }
+    )
+
+    response = client.post(
+        "/api/v1/tailor-runs/confirmed-jobs",
+        json={
+            "resume_text": parsed["resume_text"],
+            "jd_text": "2026 校招产品经理\n要求：SQL，数据分析",
+            "output_language": "zh",
+            "max_iterations": 1,
+            "confirmed_candidate_profile": parsed["candidate_profile"],
+            "confirmed_fact_cards": parsed["fact_cards"],
+        },
+    )
+
+    assert response.status_code == 200
+    run_id = response.json()["run_id"]
+    final_payload = None
+    for _ in range(40):
+        job = client.get("/api/v1/tailor-runs/{0}/status".format(run_id)).json()
+        if job["status"] == "completed":
+            final_payload = job
+            break
+        time.sleep(0.05)
+
+    assert final_payload is not None
+    result = final_payload["result"]
+    assert result["candidate_profile"]["basics"]["name"] == "李四"
+    assert result["candidate_profile"]["projects"][0]["bullets"] == [
+        "使用 SQL 复盘增长实验，并沉淀分析结论",
+        "独立负责实验数据清洗、分析与结论汇报",
+    ]
+    assert "李四" in result["final_package"]["draft"]["headline"]
+
+
 def test_async_upload_job_exposes_progress_and_result(monkeypatch) -> None:
     monkeypatch.setenv("LLM_PROVIDER", "stub")
     app = create_app()

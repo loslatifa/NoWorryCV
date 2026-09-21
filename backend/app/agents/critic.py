@@ -12,6 +12,7 @@ class CriticAgent(BaseAgent):
     JD_META_MARKERS = ("JD", "岗位要求", "任职要求", "加分项", "对应要求", "岗位需求", "对应 JD", "匹配 JD", "符合 JD")
     GENERIC_BULLET_MARKERS = ("相关经验", "相关能力", "能力基础", "能力证明", "业务推进", "结果交付", "相关工作", "学习能力")
     WEAK_STARTERS = ("参与", "支持", "协助", "配合", "跟进", "assist", "support", "participate")
+    SUMMARY_META_MARKERS = ("适合从", "进一步展开", "能力基础", "结果交付", "业务推进", "当前以", "已按")
 
     def run(
         self,
@@ -72,12 +73,17 @@ class CriticAgent(BaseAgent):
             next_actions.append("删除或改写夸张词，保留可验证的动作和结果。")
         if ats_report.score < 70:
             major_issues += 1
-            minor_issues.append("ATS 分数偏低，结构或关键词覆盖仍需优化。")
+            minor_issues.append("JD 匹配参考分偏低，结构或关键词覆盖仍需优化。")
             next_actions.append("增加与 JD 已重合的真实技能词，并前置高相关经历。")
         if ats_report.missing_keywords:
             minor_issues.append("仍有未覆盖关键词：{0}".format(", ".join(ats_report.missing_keywords[:5])))
             next_actions.append("只在有真实依据时补充或重排相关关键词。")
         minor_issues.extend(ats_report.format_warnings)
+
+        summary_issue = self._find_summary_issue(draft.summary, track=jd_profile.hiring_track)
+        if summary_issue:
+            minor_issues.append(summary_issue)
+            next_actions.append("把 summary 改成候选人口吻，直接概括真实经历、场景和结果，不要写成系统说明或抽象匹配语。")
 
         jd_meta_bullets = self._find_jd_meta_bullets(draft)
         if jd_meta_bullets:
@@ -156,3 +162,15 @@ class CriticAgent(BaseAgent):
         if any(marker in bullet or marker in lower for marker in result_markers):
             return True
         return any(char.isdigit() for char in bullet)
+
+    def _find_summary_issue(self, summary: str, track: str) -> str:
+        value = (summary or "").strip()
+        if not value:
+            return ""
+        if any(marker in value for marker in self.SUMMARY_META_MARKERS):
+            return "summary 仍然偏系统说明或 AI 匹配稿语气，不够像候选人的真实职业概括。"
+        if track in {"campus", "intern"} and any(marker in value for marker in ("资深", "多年", "职责范围", "ownership")):
+            return "当前 summary 与校招/实习口吻不匹配，仍偏资深社招表达。"
+        if track == "experienced" and any(marker in value for marker in ("学习潜力", "课程", "校园")):
+            return "当前 summary 与社招口吻不匹配，仍偏校招式潜力表达。"
+        return ""

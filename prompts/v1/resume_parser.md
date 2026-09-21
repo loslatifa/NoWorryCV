@@ -16,5 +16,6 @@
 - 复合技能必须保持完整，例如 `A/B Testing`、`Power BI`、`Next.js`，不要错误拆分。
 - `work_experiences[].achievements` 只放原文中已经出现数字、比例、金额、效率提升等结果的 bullet。
 - `projects[].role` 只有在原文明确出现时才填写。
+- 如果 `compact_mode=true`，说明输入是压缩过的简历摘录；此时仍要优先抽取最关键的工作经历、项目、教育和技能，不要因为信息不完整而胡乱补全。
 - 如果字段不确定，返回空字符串或空数组。
 - 输出必须与提供的 JSON Schema 完全一致。

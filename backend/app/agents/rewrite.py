@@ -15,7 +15,7 @@ from backend.app.services.scoring.heuristics import normalize_token, unique_pres
 class ResumeRewriteAgent(BaseAgent):
     name = "resume_rewrite"
     prompt_name = "rewrite"
-    llm_metadata = {"max_tokens": 1600}
+    llm_metadata = {"max_tokens": 1600, "timeout_seconds": 90}
     JD_META_MARKERS = (
         "jd",
         "岗位要求",
@@ -91,6 +91,18 @@ class ResumeRewriteAgent(BaseAgent):
         "相关工作",
         "相关事项",
     }
+    ABSTRACT_STYLE_MARKERS = {
+        "具备",
+        "积累了",
+        "形成了",
+        "相关经验",
+        "相关实践",
+        "能力基础",
+        "能力证明",
+        "适合",
+        "支撑业务推进",
+        "结果交付",
+    }
     CAMPUS_PROJECT_HINTS = {
         "项目",
         "课程",
@@ -128,33 +140,79 @@ class ResumeRewriteAgent(BaseAgent):
         if fallback_result is not _NO_FALLBACK:
             return fallback_result
 
+        full_output: Optional[ResumeDraftStructuredOutput] = None
         try:
-            structured_output = self.invoke_structured(
-                context={
-                    "candidate_profile": candidate,
-                    "fact_cards": fact_cards,
-                    "jd_profile": jd_profile,
-                    "gap_analysis": gap_analysis,
-                    "rewrite_strategy": strategy,
-                    "language": language,
-                },
+            full_output = self.invoke_structured(
+                context=self._build_llm_context(
+                    candidate,
+                    fact_cards,
+                    jd_profile,
+                    gap_analysis,
+                    strategy,
+                    language,
+                ),
                 response_model=ResumeDraftStructuredOutput,
             )
-            if self.strict_llm_mode and self._is_structured_output_incomplete(structured_output, fallback, strategy):
-                raise StructuredLLMError("Rewrite agent returned incomplete structured output.")
-            draft = self._from_structured_output(
-                structured_output,
-                fact_cards,
-                gap_analysis,
-                language,
-                strategy,
-                fallback,
+            draft = self._build_draft_from_output(
+                output=full_output,
+                fact_cards=fact_cards,
+                jd_profile=jd_profile,
+                gap_analysis=gap_analysis,
+                language=language,
+                strategy=strategy,
+                fallback=fallback,
+                allow_fallback_merge=not self.strict_llm_mode,
             )
-            if not self._has_traceable_content(draft):
-                raise StructuredLLMError("Rewrite agent returned insufficient traceable content.")
-            return draft
+            if draft is not None:
+                return draft
         except StructuredLLMError as exc:
-            return self.fallback_on_error(exc, fallback)
+            first_error = exc
+        else:
+            first_error = StructuredLLMError("Rewrite agent returned incomplete structured output.")
+
+        try:
+            compact_output = self.invoke_structured(
+                context=self._build_llm_context(
+                    candidate,
+                    fact_cards,
+                    jd_profile,
+                    gap_analysis,
+                    strategy,
+                    language,
+                    compact_mode=True,
+                ),
+                response_model=ResumeDraftStructuredOutput,
+            )
+            draft = self._build_draft_from_output(
+                output=compact_output,
+                fact_cards=fact_cards,
+                jd_profile=jd_profile,
+                gap_analysis=gap_analysis,
+                language=language,
+                strategy=strategy,
+                fallback=fallback,
+                allow_fallback_merge=True,
+            )
+            if draft is not None:
+                return draft
+        except StructuredLLMError:
+            pass
+
+        if full_output is not None:
+            repaired = self._build_draft_from_output(
+                output=full_output,
+                fact_cards=fact_cards,
+                jd_profile=jd_profile,
+                gap_analysis=gap_analysis,
+                language=language,
+                strategy=strategy,
+                fallback=fallback,
+                allow_fallback_merge=True,
+            )
+            if repaired is not None:
+                return repaired
+
+        return self.fallback_on_error(first_error, fallback)
 
     def _run_fallback(
         self,
@@ -241,10 +299,12 @@ class ResumeRewriteAgent(BaseAgent):
         self,
         output: ResumeDraftStructuredOutput,
         fact_cards: List[FactCard],
+        jd_profile: JDProfile,
         gap_analysis: GapAnalysis,
         language: str,
         strategy: RewriteStrategy,
         fallback: ResumeDraft,
+        allow_fallback_merge: bool = False,
     ) -> ResumeDraft:
         fact_id_set = {card.id for card in fact_cards}
         used_fallback_sections = False
@@ -254,7 +314,7 @@ class ResumeRewriteAgent(BaseAgent):
             gap_analysis,
             strategy.audience_hint,
         )
-        if not self.strict_llm_mode and self._should_use_fallback_sections(experience_section, fallback.experience_section):
+        if allow_fallback_merge and self._should_use_fallback_sections(experience_section, fallback.experience_section):
             experience_section = fallback.experience_section
             used_fallback_sections = True
         project_section = self._convert_sections(
@@ -263,16 +323,18 @@ class ResumeRewriteAgent(BaseAgent):
             gap_analysis,
             strategy.audience_hint,
         )
-        if strategy.include_projects and not self.strict_llm_mode and self._should_use_fallback_sections(project_section, fallback.project_section):
+        if strategy.include_projects and allow_fallback_merge and self._should_use_fallback_sections(project_section, fallback.project_section):
             project_section = fallback.project_section
             used_fallback_sections = True
         education_section = output.education_section
-        if not self.strict_llm_mode and self._should_use_fallback_education(education_section, fallback.education_section):
+        if allow_fallback_merge and self._should_use_fallback_education(education_section, fallback.education_section):
             education_section = fallback.education_section
             used_fallback_sections = True
         skills_section = self._normalize_skills(output.skills_section, fact_cards, fallback.skills_section)
         headline = self._sanitize_headline(output.headline, fallback.headline, language)
         summary = self._sanitize_summary(output.summary, fallback.summary, language)
+        if self._should_use_fallback_summary(summary, fallback.summary, strategy.audience_hint, jd_profile, language):
+            summary = fallback.summary
         traceability = self._build_traceability(output.experience_section, output.project_section, fact_id_set, fact_cards)
         if used_fallback_sections or not traceability:
             traceability = fallback.traceability
@@ -296,6 +358,132 @@ class ResumeRewriteAgent(BaseAgent):
             markdown=markdown,
             traceability=traceability,
         )
+
+    def _build_draft_from_output(
+        self,
+        output: ResumeDraftStructuredOutput,
+        fact_cards: List[FactCard],
+        jd_profile: JDProfile,
+        gap_analysis: GapAnalysis,
+        language: str,
+        strategy: RewriteStrategy,
+        fallback: ResumeDraft,
+        allow_fallback_merge: bool,
+    ) -> Optional[ResumeDraft]:
+        if self._is_structured_output_incomplete(output, fallback, strategy) and not allow_fallback_merge:
+            return None
+        draft = self._from_structured_output(
+            output,
+            fact_cards,
+            jd_profile,
+            gap_analysis,
+            language,
+            strategy,
+            fallback,
+            allow_fallback_merge=allow_fallback_merge,
+        )
+        if not self._has_traceable_content(draft):
+            return None
+        return draft
+
+    def _build_llm_context(
+        self,
+        candidate: CandidateProfile,
+        fact_cards: List[FactCard],
+        jd_profile: JDProfile,
+        gap_analysis: GapAnalysis,
+        strategy: RewriteStrategy,
+        language: str,
+        compact_mode: bool = False,
+    ) -> Dict:
+        if not compact_mode:
+            return {
+                "candidate_profile": candidate,
+                "fact_cards": fact_cards,
+                "jd_profile": jd_profile,
+                "gap_analysis": gap_analysis,
+                "rewrite_strategy": strategy,
+                "language": language,
+                "compact_mode": False,
+            }
+        relevant_fact_cards = self._select_relevant_fact_cards(
+            fact_cards,
+            gap_analysis.recommended_focus + gap_analysis.strengths + jd_profile.must_have_skills,
+            limit=8,
+        )
+        return {
+            "compact_mode": True,
+            "language": language,
+            "jd_profile": {
+                "job_title": jd_profile.job_title,
+                "department": jd_profile.department,
+                "hiring_track": jd_profile.hiring_track,
+                "must_have_skills": jd_profile.must_have_skills[:4],
+                "keywords": jd_profile.keywords[:6],
+                "domain_signals": jd_profile.domain_signals[:3],
+            },
+            "gap_analysis": {
+                "strengths": gap_analysis.strengths[:6],
+                "missing_keywords": gap_analysis.missing_keywords[:4],
+                "recommended_focus": gap_analysis.recommended_focus[:6],
+            },
+            "rewrite_strategy": {
+                "audience_hint": strategy.audience_hint,
+                "section_priority": strategy.section_priority,
+                "keyword_plan": strategy.keyword_plan[:6],
+                "max_experiences": strategy.max_experiences,
+                "max_bullets_per_experience": strategy.max_bullets_per_experience,
+                "max_skills": strategy.max_skills,
+                "include_projects": strategy.include_projects,
+                "summary_style": strategy.summary_style,
+            },
+            "candidate_profile": {
+                "basics": {
+                    "name": candidate.basics.name,
+                    "language": candidate.basics.language,
+                },
+                "summary": candidate.summary,
+                "work_experiences": [
+                    {
+                        "company": experience.company,
+                        "title": experience.title,
+                        "bullets": experience.bullets[:3],
+                        "achievements": experience.achievements[:2],
+                        "skills_used": experience.skills_used[:4],
+                    }
+                    for experience in candidate.work_experiences[: strategy.max_experiences]
+                ],
+                "projects": [
+                    {
+                        "name": project.name,
+                        "role": project.role,
+                        "bullets": project.bullets[:2],
+                        "skills_used": project.skills_used[:4],
+                    }
+                    for project in candidate.projects[:2]
+                ],
+                "education": [
+                    {
+                        "school": education.school,
+                        "degree": education.degree,
+                        "field_of_study": education.field_of_study,
+                    }
+                    for education in candidate.education[:2]
+                ],
+                "skills": {
+                    "hard_skills": candidate.skills.hard_skills[:8],
+                    "tools": candidate.skills.tools[:6],
+                },
+            },
+            "fact_cards": [
+                {
+                    "id": card.id,
+                    "category": card.category,
+                    "text": card.text,
+                }
+                for card in relevant_fact_cards
+            ],
+        }
 
     def _convert_sections(
         self,
@@ -506,6 +694,30 @@ class ResumeRewriteAgent(BaseAgent):
         prioritized = gap_analysis.strengths + candidate.skills.hard_skills + candidate.skills.tools
         return unique_preserve_order(prioritized)[: strategy.max_skills]
 
+    def _select_relevant_fact_cards(
+        self,
+        fact_cards: List[FactCard],
+        priorities: List[str],
+        limit: int,
+    ) -> List[FactCard]:
+        normalized_priorities = [normalize_token(item) for item in priorities if normalize_token(item)]
+        scored = []
+        for index, card in enumerate(fact_cards):
+            text = normalize_token(card.text)
+            score = sum(max(1, len(normalized_priorities) - priority_index) for priority_index, item in enumerate(normalized_priorities) if item in text)
+            scored.append((score, -index, card))
+        scored.sort(key=lambda item: (item[0], item[1]), reverse=True)
+        selected = [item[2] for item in scored if item[0] > 0]
+        if len(selected) < limit:
+            seen = {card.id for card in selected}
+            for card in fact_cards:
+                if card.id in seen:
+                    continue
+                selected.append(card)
+                if len(selected) >= limit:
+                    break
+        return selected[:limit]
+
     def _build_education(self, candidate: CandidateProfile) -> List[str]:
         lines = []
         for education in candidate.education:
@@ -561,50 +773,44 @@ class ResumeRewriteAgent(BaseAgent):
         if language == "zh":
             if hiring_track == "campus":
                 if education and project_signal and focus:
-                    return "{0}背景，具备{1}等基础能力，曾通过{2}积累与{3}相关的项目实践。".format(
+                    return "{0}背景，聚焦{1}方向，具备{2}等基础能力，曾在项目或实践中{3}。".format(
                         education[0],
+                        target_role,
                         focus,
                         project_signal,
-                        target_role,
                     )
                 if education and focus:
-                    return "{0}背景，具备{1}等与{2}相关的基础能力，适合在校招场景中进一步展示项目与学习潜力。".format(
+                    return "{0}背景，聚焦{1}方向，具备{2}等基础能力，相关经历主要来自项目、课程或实习实践。".format(
                         education[0],
-                        focus,
                         target_role,
+                        focus,
                     )
-                return "具备与{0}相关的基础能力和学习潜力，适合从教育、项目与实践经历中展开证明。".format(target_role)
+                return "聚焦{0}方向，已通过教育、项目或实践经历形成与岗位相关的基础能力。".format(target_role)
             if hiring_track == "intern":
                 if project_signal and focus:
-                    return "具备{0}等基础能力，并通过{1}积累了与{2}相关的项目实践，能够较快进入实习岗位工作节奏。".format(
+                    return "聚焦{0}方向，具备{1}等基础能力，曾在项目或实习中{2}。".format(
+                        target_role,
                         focus,
                         project_signal,
-                        target_role,
                     )
-                return "具备与{0}相关的基础能力、项目实践和快速学习潜力，适合实习岗位场景。".format(target_role)
+                return "聚焦{0}方向，具备岗位相关的基础能力和项目实践，重点体现在执行力、分析能力和快速学习上。".format(target_role)
             if experience_signal and focus:
-                if summary_style == "impact_and_scope":
-                    return "具备{0}等与{1}高度相关的实践经验，曾{2}，能够支撑业务推进、跨团队协作与结果交付。".format(
-                        focus,
-                        target_role,
-                        experience_signal,
-                    )
-                return "具备{0}等与{1}高度相关的实践经验，曾{2}，能够支撑相关岗位所需的业务推进与结果交付。".format(
-                    focus,
+                return "聚焦{0}方向，具备{1}等相关实践，曾{2}。".format(
                     target_role,
+                    focus,
                     experience_signal,
                 )
             if focus:
                 if summary_style == "impact_and_scope":
-                    return "具备与{0}相关的技能和业务实践基础，核心能力包括{1}，适合继续展开职责范围与结果证明。".format(
+                    return "聚焦{0}方向，相关实践覆盖{1}等重点能力。".format(
                         target_role,
                         focus,
                     )
-                return "具备与{0}相关的技能和实践基础，重点能力包括{1}。".format(
+                return "聚焦{0}方向，重点能力包括{1}。".format(
                     target_role,
                     focus,
                 )
-            return "具备与{0}相关的实践基础，能够从真实经历中展开说明业务理解、执行过程与结果。".format(target_role)
+            return "聚焦{0}方向，具备与岗位相关的真实实践，可从过往经历中说明具体动作、场景与结果。".format(target_role)
         if focus:
             return "Experience aligned with {0}, with verified strengths in {1} and evidence from prior work or projects.".format(
                 target_role,
@@ -671,22 +877,61 @@ class ResumeRewriteAgent(BaseAgent):
         value = (headline or "").strip()
         if not value:
             return fallback
+        expected_name = self._headline_name_from_fallback(fallback)
+        expected_role = self._headline_role_from_fallback(fallback, language)
         if language == "zh":
             safe_markers = ("面向", "申请", "定制简历")
-            if any(marker in value for marker in safe_markers):
+            if expected_name and expected_name not in value:
+                return fallback
+            if expected_role and expected_role not in value:
+                return fallback
+            if any(marker in value for marker in safe_markers) and "|" in value:
                 return value
             return fallback
         safe_markers = ("for ", "tailored", "application")
+        if expected_name and expected_name not in value:
+            return fallback
+        if expected_role and expected_role.lower() not in value.lower():
+            return fallback
         if any(marker in value.lower() for marker in safe_markers):
             return value
         return fallback
+
+    def _headline_name_from_fallback(self, fallback: str) -> str:
+        if "|" not in fallback:
+            return ""
+        candidate = fallback.split("|", 1)[0].strip()
+        if candidate in {"Candidate", "候选人"}:
+            return ""
+        return candidate
+
+    def _headline_role_from_fallback(self, fallback: str, language: str) -> str:
+        if language == "zh":
+            matched = re.search(r"面向\s*(.+?)\s*的", fallback)
+            if matched:
+                return matched.group(1).strip()
+        matched = re.search(r"for\s+(.+)$", fallback, flags=re.IGNORECASE)
+        if matched:
+            return matched.group(1).strip()
+        return ""
 
     def _sanitize_summary(self, summary: str, fallback: str, language: str) -> str:
         value = (summary or "").strip()
         if len(value) < 24:
             return fallback
         meta_markers = ["围绕", "已按", "当前以", "重排", "reordered", "tailored resume", "this resume"]
-        vague_markers = ["优秀", "出色", "资深", "highly motivated", "excellent", "seasoned"]
+        vague_markers = [
+            "优秀",
+            "出色",
+            "资深",
+            "highly motivated",
+            "excellent",
+            "seasoned",
+            "能力基础",
+            "结果交付",
+            "业务推进",
+            "进一步展开",
+        ]
         lowered = value.lower()
         if any(marker in value or marker in lowered for marker in meta_markers):
             return fallback
@@ -695,6 +940,32 @@ class ResumeRewriteAgent(BaseAgent):
         if language == "zh" and len(value) < 28:
             return fallback
         return value
+
+    def _should_use_fallback_summary(
+        self,
+        summary: str,
+        fallback: str,
+        audience_hint: str,
+        jd_profile: JDProfile,
+        language: str,
+    ) -> bool:
+        value = (summary or "").strip()
+        baseline = (fallback or "").strip()
+        if not value:
+            return True
+        if not baseline or value == baseline:
+            return False
+        value_score = self._summary_specificity_score(value, audience_hint, jd_profile, language)
+        fallback_score = self._summary_specificity_score(baseline, audience_hint, jd_profile, language)
+        if self._summary_is_list_like(value, language) and not self._summary_is_list_like(baseline, language):
+            return True
+        if fallback_score >= value_score + 2:
+            return True
+        if self._summary_has_role_context(baseline, jd_profile) and not self._summary_has_role_context(value, jd_profile):
+            return True
+        if self._summary_has_result_or_action_signal(baseline) and not self._summary_has_result_or_action_signal(value):
+            return True
+        return False
 
     def _fact_ids_for_text(self, fact_cards: List[FactCard], text: str) -> List[str]:
         return [card.id for card in fact_cards if card.text == text]
@@ -777,6 +1048,10 @@ class ResumeRewriteAgent(BaseAgent):
             return value
         source_score = self._bullet_quality_score(source_text, gap_analysis, audience_hint)
         candidate_score = self._bullet_quality_score(value, gap_analysis, audience_hint)
+        source_specificity = self._bullet_specificity_score(source_text, audience_hint)
+        candidate_specificity = self._bullet_specificity_score(value, audience_hint)
+        if source_specificity >= candidate_specificity + 1 and source_score >= candidate_score:
+            return source_text
         if source_score >= candidate_score + 2:
             return source_text
         return value
@@ -799,6 +1074,9 @@ class ResumeRewriteAgent(BaseAgent):
     def _looks_abstract_or_ai_like(self, bullet: str, normalized: str) -> bool:
         if any(marker in bullet or marker in normalized for marker in self.GENERIC_BULLET_MARKERS):
             return True
+        if any(marker in bullet or marker in normalized for marker in self.ABSTRACT_STYLE_MARKERS):
+            if not self._has_concrete_context(bullet, normalized) or not self._has_action_signal(bullet, normalized):
+                return True
         if "能力" in bullet and not any(char.isdigit() for char in bullet):
             return True
         if self._starts_with_weak_action(normalized) and not self._has_result_signal(bullet, normalized):
@@ -806,6 +1084,81 @@ class ResumeRewriteAgent(BaseAgent):
         if len(normalized) < 10:
             return True
         return False
+
+    def _summary_has_result_or_action_signal(self, summary: str) -> bool:
+        normalized = normalize_token(summary)
+        return (
+            self._has_action_signal(summary, normalized)
+            or self._has_result_signal(summary, normalized)
+            or any(char.isdigit() for char in summary)
+        )
+
+    def _summary_has_role_context(self, summary: str, jd_profile: JDProfile) -> bool:
+        role = (jd_profile.job_title or "").strip()
+        if role and role in summary:
+            return True
+        track_markers = {
+            "campus": ("校招", "应届", "项目", "课程", "实习"),
+            "intern": ("实习", "项目", "上手", "执行"),
+            "experienced": ("负责", "主导", "业务", "跨团队", "增长", "运营", "产品"),
+        }
+        return any(marker in summary for marker in track_markers.get(jd_profile.hiring_track, ()))
+
+    def _summary_is_list_like(self, summary: str, language: str) -> bool:
+        value = (summary or "").strip()
+        if not value:
+            return False
+        if language == "zh":
+            delimiter_count = value.count("、") + value.count("，")
+        else:
+            delimiter_count = value.count(",")
+        normalized = normalize_token(value)
+        return delimiter_count >= 2 and not self._summary_has_result_or_action_signal(value) and not self._has_concrete_context(value, normalized)
+
+    def _summary_specificity_score(
+        self,
+        summary: str,
+        audience_hint: str,
+        jd_profile: JDProfile,
+        language: str,
+    ) -> int:
+        value = (summary or "").strip()
+        normalized = normalize_token(value)
+        score = 0
+        if self._summary_has_role_context(value, jd_profile):
+            score += 2
+        if self._summary_has_result_or_action_signal(value):
+            score += 2
+        if self._has_concrete_context(value, normalized):
+            score += 1
+        if not self._summary_is_list_like(value, language):
+            score += 1
+        if audience_hint in {"campus", "intern"} and any(token in value for token in self.CAMPUS_PROJECT_HINTS):
+            score += 1
+        if audience_hint == "experienced" and any(token.lower() in normalized for token in self.EXPERIENCED_SCOPE_HINTS):
+            score += 1
+        if any(marker in value or marker in normalized for marker in self.GENERIC_BULLET_MARKERS):
+            score -= 2
+        return score
+
+    def _bullet_specificity_score(self, bullet: str, audience_hint: str) -> int:
+        normalized = normalize_token(bullet)
+        score = 0
+        if any(char.isdigit() for char in bullet):
+            score += 2
+        if self._has_action_signal(bullet, normalized):
+            score += 2
+        if self._has_result_signal(bullet, normalized):
+            score += 2
+        if self._has_concrete_context(bullet, normalized):
+            score += 1
+        if audience_hint == "experienced" and any(token.lower() in normalized for token in self.EXPERIENCED_SCOPE_HINTS):
+            score += 1
+        if audience_hint in {"campus", "intern"} and any(token in bullet for token in self.CAMPUS_PROJECT_HINTS):
+            score += 1
+        if self._looks_abstract_or_ai_like(bullet, normalized):
+            score -= 3
+        return score
 
     def _summary_skills(self, candidate: CandidateProfile, gap_analysis: GapAnalysis) -> List[str]:
         return unique_preserve_order(gap_analysis.strengths + candidate.skills.hard_skills + candidate.skills.tools)
@@ -864,27 +1217,24 @@ class ResumeRewriteAgent(BaseAgent):
             return value
         role = jd_profile.job_title or "目标岗位"
         if jd_profile.hiring_track == "campus":
-            return "{0} 与 {1} 方向相关，适合从教育、项目或实习经历中进一步展开能力证明。".format(
+            return "{0}，并在教育、项目或实习经历中形成了与{1}相关的基础实践。".format(
                 self._shorten_signal(value),
                 role,
             )
         if jd_profile.hiring_track == "intern":
-            return "{0}，适合从项目实践和快速学习能力切入 {1} 实习场景。".format(
+            return "{0}，重点体现在项目实践、执行力和快速学习能力上。".format(
                 self._shorten_signal(value),
-                role,
             )
         focus_items = self._summary_skills_from_gap(gap_analysis)
         if focus_items:
             if strategy_style == "impact_and_scope":
-                return "{0}，并具备{1}等与{2}相关的能力基础，能够进一步展开职责范围与业务结果。".format(
+                return "{0}，相关实践覆盖{1}等方向。".format(
                     self._shorten_signal(value),
                     "、".join(focus_items[:3]),
-                    role,
                 )
-            return "{0}，并具备{1}等与{2}相关的能力基础。".format(
+            return "{0}，重点经验包括{1}。".format(
                 self._shorten_signal(value),
                 "、".join(focus_items[:3]),
-                role,
             )
         return value
 
