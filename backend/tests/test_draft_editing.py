@@ -23,7 +23,7 @@ def _completed_run():
         run_id=job.run_id,
     )
     completed = store.mark_completed(job.run_id, result, "简历定制完成。")
-    return completed
+    return completed.model_copy(update={"access_token": job.access_token}, deep=True)
 
 
 def test_manual_edit_invalidates_changed_bullet_traceability() -> None:
@@ -43,8 +43,9 @@ def test_draft_save_and_partial_rewrite_create_persistent_versions() -> None:
     completed = _completed_run()
     client = TestClient(create_app())
     run_id = completed.run_id
+    headers = {"X-Run-Token": completed.access_token}
 
-    versions_response = client.get("/api/v1/tailor-runs/{0}/draft-versions".format(run_id))
+    versions_response = client.get("/api/v1/tailor-runs/{0}/draft-versions".format(run_id), headers=headers)
     assert versions_response.status_code == 200
     assert len(versions_response.json()) == 1
     assert versions_response.json()[0]["source"] == "generated"
@@ -53,6 +54,7 @@ def test_draft_save_and_partial_rewrite_create_persistent_versions() -> None:
     draft.project_section[0].bullets[0] = "新增了没有事实依据的项目成果"
     save_response = client.put(
         "/api/v1/tailor-runs/{0}/draft".format(run_id),
+        headers=headers,
         json={"draft": draft.model_dump(mode="json"), "label": "我的修改"},
     )
 
@@ -65,6 +67,7 @@ def test_draft_save_and_partial_rewrite_create_persistent_versions() -> None:
 
     rewrite_response = client.post(
         "/api/v1/tailor-runs/{0}/rewrite-part".format(run_id),
+        headers=headers,
         json={
             "draft": saved["version"]["draft"],
             "target_type": "skills",
@@ -78,6 +81,6 @@ def test_draft_save_and_partial_rewrite_create_persistent_versions() -> None:
     assert len(rewritten["versions"]) == 3
     assert rewritten["version"]["draft"]["skills_section"]
 
-    persisted = client.get("/api/v1/tailor-runs/{0}/status".format(run_id)).json()
+    persisted = client.get("/api/v1/tailor-runs/{0}/status".format(run_id), headers=headers).json()
     assert len(persisted["result"]["draft_versions"]) == 3
     assert persisted["result"]["final_package"]["draft"] == rewritten["version"]["draft"]

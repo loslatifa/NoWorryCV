@@ -21,6 +21,11 @@ from backend.app.schemas.review import ReviewBundle
 from backend.app.schemas.run_state import TailorRunInput, TailorRunResult, TailorRunState
 from backend.app.schemas.strategy import FinalResumePackage
 from backend.app.services.follow_up_questions import build_follow_up_questions
+from backend.app.services.confirmed_profile import align_confirmed_profile
+
+
+class RunCancelledError(RuntimeError):
+    pass
 
 
 class ResumeTailorOrchestrator:
@@ -114,6 +119,81 @@ class ResumeTailorOrchestrator:
         self._report_progress("completed", 100, "简历定制完成，结果已准备好。")
         return self._build_result(state)
 
+    def run_resumable(
+        self,
+        payload: TailorRunInput,
+        run_id: str,
+        checkpoint_state: Optional[Dict] = None,
+        next_stage: str = "analyze_jd",
+        checkpoint_callback: Optional[Callable[[str, str, Dict, int], None]] = None,
+        should_cancel: Optional[Callable[[], bool]] = None,
+    ) -> TailorRunResult:
+        """Run the graph one durable stage at a time and checkpoint each successful stage."""
+        if checkpoint_state:
+            state = TailorRunState.model_validate(checkpoint_state)
+            raw_state = state.model_dump(mode="json")
+        else:
+            state = TailorRunState(
+                run_id=run_id,
+                input=payload,
+                resolved_language=payload.output_language,
+            )
+            raw_state = state.model_dump(mode="json")
+            next_stage = "analyze_jd"
+
+        stage_nodes = {
+            "analyze_jd": self._analyze_jd_node,
+            "review_cards": self._review_cards_node,
+            "jd_review_doc": self._jd_review_doc_node,
+            "parse_resume": self._parse_resume_node,
+            "gap_analysis": self._gap_analysis_node,
+            "strategy": self._strategy_node,
+            "rewrite": self._rewrite_node,
+            "review": self._review_node,
+            "refine_strategy": self._refine_strategy_node,
+            "finalize": self._finalize_node,
+        }
+        fixed_next = {
+            "analyze_jd": "review_cards",
+            "review_cards": "jd_review_doc",
+            "jd_review_doc": "parse_resume",
+            "parse_resume": "gap_analysis",
+            "gap_analysis": "strategy",
+            "strategy": "rewrite",
+            "rewrite": "review",
+            "refine_strategy": "rewrite",
+        }
+
+        self._report_progress("queued", 3, "正在从已保存进度继续任务。" if checkpoint_state else "任务已创建，准备优先分析 JD。")
+        stage = next_stage or "analyze_jd"
+        while stage:
+            if should_cancel and should_cancel():
+                raise RunCancelledError("Run was cancelled by the user.")
+            node = stage_nodes.get(stage)
+            if node is None:
+                raise RuntimeError("Unknown resumable stage: {0}".format(stage))
+            started_at = time.perf_counter()
+            raw_state = node(raw_state)
+            duration_ms = int((time.perf_counter() - started_at) * 1000)
+            if stage == "review":
+                following_stage = self._route_after_review(raw_state)
+            elif stage == "finalize":
+                following_stage = ""
+            elif stage == "analyze_jd" and payload.processing_mode == "application":
+                following_stage = "parse_resume"
+            else:
+                following_stage = fixed_next[stage]
+            if checkpoint_callback:
+                checkpoint_callback(stage, following_stage, raw_state, duration_ms)
+            stage = following_stage
+
+        state = TailorRunState.model_validate(raw_state)
+        state.stop_reason = self._derive_stop_reason(state)
+        if state.final_package is None:
+            state.final_package = self._build_final_package(state, state.resolved_language)
+        self._report_progress("completed", 100, "简历定制完成，结果已准备好。")
+        return self._build_result(state)
+
     def _build_graph(self):
         graph = StateGraph(dict)
         graph.add_node("analyze_jd", self._analyze_jd_node)
@@ -128,7 +208,9 @@ class ResumeTailorOrchestrator:
         graph.add_node("finalize", self._finalize_node)
 
         graph.set_entry_point("analyze_jd")
-        graph.add_edge("analyze_jd", "review_cards")
+        graph.add_conditional_edges("analyze_jd", lambda raw: (
+            "parse_resume" if raw["input"].get("processing_mode") == "application" else "review_cards"
+        ), {"parse_resume": "parse_resume", "review_cards": "review_cards"})
         graph.add_edge("review_cards", "jd_review_doc")
         graph.add_edge("jd_review_doc", "parse_resume")
         graph.add_edge("parse_resume", "gap_analysis")
@@ -268,44 +350,7 @@ class ResumeTailorOrchestrator:
         return state.model_dump(mode="json")
 
     def _apply_confirmed_facts_to_profile(self, candidate_profile, fact_cards) -> None:
-        """Keep editable profile sections aligned with the user-confirmed fact set."""
-        for experience in candidate_profile.work_experiences:
-            prefix = "work_experiences.{0}.bullets.".format(experience.id)
-            experience.bullets = [card.text for card in fact_cards if card.source_span.startswith(prefix)]
-            experience.achievements = [
-                bullet for bullet in experience.bullets if any(character.isdigit() for character in bullet)
-            ]
-
-        for project in candidate_profile.projects:
-            prefix = "projects.{0}.bullets.".format(project.id)
-            project.bullets = [card.text for card in fact_cards if card.source_span.startswith(prefix)]
-
-        confirmed_skills = [card.text for card in fact_cards if card.category == "skill"]
-        original_tools = {tool.strip().lower() for tool in candidate_profile.skills.tools}
-        candidate_profile.skills.tools = [skill for skill in confirmed_skills if skill.strip().lower() in original_tools]
-        candidate_profile.skills.hard_skills = [
-            skill for skill in confirmed_skills if skill.strip().lower() not in original_tools
-        ]
-        candidate_profile.certifications = [
-            card.text for card in fact_cards if card.category == "certification"
-        ]
-
-        supplemental_facts = [
-            card
-            for card in fact_cards
-            if card.source_type == "user"
-            and card.source_span.startswith(("follow_up.", "user_added"))
-        ]
-        for card in supplemental_facts:
-            if card.category == "project_bullet" and candidate_profile.projects:
-                candidate_profile.projects[0].bullets.append(card.text)
-            elif card.category in {"work_bullet", "achievement"} and candidate_profile.work_experiences:
-                candidate_profile.work_experiences[0].bullets.append(card.text)
-            elif card.category == "general":
-                if candidate_profile.work_experiences:
-                    candidate_profile.work_experiences[0].bullets.append(card.text)
-                elif candidate_profile.projects:
-                    candidate_profile.projects[0].bullets.append(card.text)
+        align_confirmed_profile(candidate_profile, fact_cards)
 
     def _gap_analysis_node(self, raw_state: Dict) -> Dict:
         state = TailorRunState.model_validate(raw_state)
@@ -466,6 +511,11 @@ class ResumeTailorOrchestrator:
 
     def _finalize_node(self, raw_state: Dict) -> Dict:
         state = TailorRunState.model_validate(raw_state)
+        if state.input.processing_mode == "application":
+            state.stop_reason = self._derive_stop_reason(state)
+            state.final_package = self._build_final_package(state, state.resolved_language)
+            self._report_progress("finalize", 99, "微调简历与真实性审查已完成，等待确认。")
+            return state.model_dump(mode="json")
         self._report_progress("finalize", 96, "正在整理最终结果与复习文档。")
         started_at = time.perf_counter()
         if state.jd_review_doc is None:

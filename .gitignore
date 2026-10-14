@@ -10,6 +10,7 @@
 *.crt
 .venv/
 .pytest_cache/
+output/playwright/
 __pycache__/
 *.pyc
 .dist/

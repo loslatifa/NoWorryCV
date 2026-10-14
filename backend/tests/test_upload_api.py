@@ -147,10 +147,12 @@ def test_confirmed_job_uses_user_corrected_profile_and_facts(monkeypatch) -> Non
     )
 
     assert response.status_code == 200
-    run_id = response.json()["run_id"]
+    created = response.json()
+    run_id = created["run_id"]
+    headers = {"X-Run-Token": created["access_token"]}
     final_payload = None
     for _ in range(40):
-        job = client.get("/api/v1/tailor-runs/{0}/status".format(run_id)).json()
+        job = client.get("/api/v1/tailor-runs/{0}/status".format(run_id), headers=headers).json()
         if job["status"] == "completed":
             final_payload = job
             break
@@ -191,12 +193,17 @@ def test_async_upload_job_exposes_progress_and_result(monkeypatch) -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload["run_id"]
+    assert payload["access_token"]
+    headers = {"X-Run-Token": payload["access_token"]}
     assert payload["current_stage"] == "queued"
 
     final_payload = None
     saw_review_cards = False
     for _ in range(40):
-        status_response = client.get("/api/v1/tailor-runs/{0}/status".format(payload["run_id"]))
+        status_response = client.get(
+            "/api/v1/tailor-runs/{0}/status".format(payload["run_id"]),
+            headers=headers,
+        )
         assert status_response.status_code == 200
         job = status_response.json()
         assert job["progress_percent"] >= 0
@@ -242,4 +249,5 @@ def test_upload_endpoint_requires_live_llm_when_strict_mode_enabled(monkeypatch)
     )
 
     assert response.status_code == 503
-    assert "已关闭启发式 fallback" in response.json()["detail"]
+    assert response.json()["detail"] == "模型服务暂时不可用，请检查服务配置或稍后重试。"
+    assert "jd_analyst" not in response.json()["detail"]

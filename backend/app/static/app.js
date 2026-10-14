@@ -60,11 +60,37 @@ const confirmAllButton = document.getElementById("confirm-all-button");
 const profileConfirmed = document.getElementById("profile-confirmed");
 const backToUploadButton = document.getElementById("back-to-upload-button");
 const confirmGenerateButton = document.getElementById("confirm-generate-button");
+const privacyConsent = document.getElementById("privacy-consent");
+const privacyRetentionHours = document.getElementById("privacy-retention-hours");
+const taskRetention = document.getElementById("task-retention");
+const deleteRunButton = document.getElementById("delete-run-button");
+const cancelRunButton = document.getElementById("cancel-run-button");
+const retryRunButton = document.getElementById("retry-run-button");
+const jobAttemptStatus = document.getElementById("job-attempt-status");
+const stageHistoryList = document.getElementById("stage-history-list");
+const archiveSelect = document.getElementById("archive-select");
+const newArchiveJobButton = document.getElementById("new-archive-job-button");
+const editArchiveButton = document.getElementById("edit-archive-button");
+const exportArchiveButton = document.getElementById("export-archive-button");
+const deleteArchiveButton = document.getElementById("delete-archive-button");
+const saveArchiveButton = document.getElementById("save-archive-button");
+const archiveStorageConsent = document.getElementById("archive-storage-consent");
+const archiveSaveStatus = document.getElementById("archive-save-status");
+let archiveCredentials = [];
+let selectedArchive = null;
+let editingArchiveId = "";
+let archiveSaving = false;
+let runIsBusy = false;
 
 let previewData = null;
 let currentRunId = "";
+let currentRunToken = "";
+let currentRunExpiresAt = "";
+let currentMaxUploadBytes = 5 * 1024 * 1024;
 let currentDraft = null;
 let draftVersions = [];
+let activeVersionId = "";
+let draftMutationInProgress = false;
 let undoStack = [];
 let redoStack = [];
 let editBaseline = null;
@@ -78,6 +104,66 @@ let exportPreviewUrl = "";
 let exportPreviewSnapshot = "";
 let scoreExplanation = null;
 let scoreExplanationIsStale = false;
+
+function runRequestHeaders(json = true) {
+  const headers = {};
+  if (json) headers["Content-Type"] = "application/json";
+  if (currentRunToken) headers["X-Run-Token"] = currentRunToken;
+  return headers;
+}
+
+function persistActiveRun() {
+  if (!currentRunId || !currentRunToken) return;
+  try {
+    sessionStorage.setItem("noworrycv-active-run", JSON.stringify({
+      runId: currentRunId,
+      token: currentRunToken,
+      expiresAt: currentRunExpiresAt,
+    }));
+  } catch (_error) {
+    // The current tab can still finish the task when session storage is unavailable.
+  }
+  rememberCurrentRun();
+}
+
+function rememberCurrentRun() {
+  if (!currentRunId || !currentRunToken) return;
+  try {
+    const saved = JSON.parse(localStorage.getItem("noworrycv-run-history") || "[]");
+    const items = Array.isArray(saved) ? saved : [];
+    const validItems = items.filter((item) => item.id !== currentRunId && item.expiresAt && new Date(item.expiresAt).getTime() > Date.now());
+    validItems.unshift({id: currentRunId, token: currentRunToken, expiresAt: currentRunExpiresAt});
+    localStorage.setItem("noworrycv-run-history", JSON.stringify(validItems.slice(0, 200)));
+  } catch (_error) {
+    // The current task remains accessible in this tab through session storage.
+  }
+  window.refreshRunHistory?.();
+}
+
+function clearActiveRun() {
+  try {
+    sessionStorage.removeItem("noworrycv-active-run");
+  } catch (_error) {
+    // Nothing else is required when browser storage is unavailable.
+  }
+}
+
+function createIdempotencyKey() {
+  if (window.crypto?.randomUUID) return window.crypto.randomUUID();
+  return `run-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+async function loadPrivacySummary() {
+  try {
+    const response = await fetch("/api/v1/privacy");
+    if (!response.ok) return;
+    const summary = await response.json();
+    privacyRetentionHours.textContent = String(summary.anonymous_retention_hours || 24);
+    currentMaxUploadBytes = Number(summary.max_upload_bytes) || currentMaxUploadBytes;
+  } catch (_error) {
+    // Static fallback remains visible when the API is temporarily unavailable.
+  }
+}
 
 const stageDefinitions = [
   { key: "queued", label: "任务排队中" },
@@ -147,12 +233,32 @@ function makeReviewField(label, value, fieldName) {
 }
 
 function renderStructuredGroup(title, kind, items, fields) {
-  if (!items?.length) return;
   const group = document.createElement("section");
   group.className = "structured-group";
+  const groupHeading = document.createElement("div");
+  groupHeading.className = "structured-group-heading";
   const heading = document.createElement("h5");
   heading.textContent = title;
-  group.appendChild(heading);
+  const addEntry = document.createElement("button");
+  addEntry.type = "button";
+  addEntry.className = "secondary-button";
+  addEntry.textContent = `新增${title}`;
+  addEntry.addEventListener("click", () => {
+    const profile = collectCandidateProfile();
+    const entryId = createIdempotencyKey();
+    const entry = kind === "projects" ? { id: entryId, name: "新项目", bullets: [], skills_used: [] }
+      : kind === "education" ? { id: entryId, school: "新学校" }
+        : { id: entryId, company: "新公司", bullets: [], skills_used: [], achievements: [] };
+    profile[kind].push(entry);
+    previewData.candidate_profile = profile;
+    previewData.fact_cards = collectFactCards();
+    renderStructuredProfile(profile);
+    renderFactCards();
+    profileConfirmed.checked = false;
+    updateConfirmationState();
+  });
+  groupHeading.append(heading, addEntry);
+  group.appendChild(groupHeading);
 
   items.forEach((item, index) => {
     const entry = document.createElement("div");
@@ -162,6 +268,21 @@ function renderStructuredGroup(title, kind, items, fields) {
     fields.forEach(([label, fieldName]) => {
       entry.appendChild(makeReviewField(label, item[fieldName], fieldName));
     });
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "text-button danger-button";
+    remove.textContent = "删除此经历及其事实";
+    remove.addEventListener("click", () => {
+      const profile = collectCandidateProfile();
+      previewData.fact_cards = collectFactCards().filter((fact) => !fact.source_span.startsWith(`${kind}.${item.id}.`) && fact.source_span !== `${kind}.${item.id}`);
+      profile[kind].splice(index, 1);
+      previewData.candidate_profile = profile;
+      renderStructuredProfile(profile);
+      renderFactCards();
+      profileConfirmed.checked = false;
+      updateConfirmationState();
+    });
+    entry.appendChild(remove);
     group.appendChild(entry);
   });
   structuredProfile.appendChild(group);
@@ -234,6 +355,7 @@ function collectFactCards() {
       category: cardElement.querySelector("select").value,
       text: cardElement.querySelector("textarea").value.trim(),
       confirmed: cardElement.querySelector("input[type='checkbox']").checked,
+      source_span: cardElement.querySelector(".fact-owner")?.value || original.source_span || "user_added",
     };
   });
 }
@@ -308,7 +430,7 @@ function buildFactsFromFollowUpAnswers() {
   return collectFollowUpAnswers()
     .filter((item) => item.status === "answered" && item.answer)
     .map((item) => ({
-      id: `fact_follow_up_${item.id}`,
+      id: `fact_follow_up_${item.id}_${createIdempotencyKey()}`,
       category: item.suggestedCategory,
       text: item.answer,
       source_type: "user",
@@ -341,6 +463,7 @@ function updateConfirmationState() {
     allFollowUpsReady &&
     profileConfirmed.checked
   );
+  saveArchiveButton.disabled = confirmGenerateButton.disabled || !archiveStorageConsent.checked || archiveSaving;
 }
 
 function renderFactCards() {
@@ -368,6 +491,24 @@ function renderFactCards() {
     confidence.textContent = fact.source_type === "user" ? "用户补充" : `置信度 ${Math.round(fact.confidence * 100)}%`;
     header.append(category, confidence);
 
+    const owner = document.createElement("select");
+    owner.className = "fact-owner";
+    owner.setAttribute("aria-label", "事实所属经历或项目");
+    const defaultOwner = document.createElement("option");
+    defaultOwner.value = fact.source_span.startsWith("work_experiences.") || fact.source_span.startsWith("projects.") ? "user_added" : (fact.source_span || "user_added");
+    defaultOwner.textContent = "通用事实 / 技能 / 其他";
+    owner.appendChild(defaultOwner);
+    ["work_experiences", "projects"].forEach((kind) => {
+      (previewData.candidate_profile[kind] || []).forEach((item) => {
+        const option = document.createElement("option");
+        const prefix = `${kind}.${item.id}.bullets.`;
+        option.value = fact.source_span.startsWith(prefix) ? fact.source_span : `${prefix}${fact.id}`;
+        option.textContent = kind === "projects" ? `项目：${item.name}` : `工作：${item.company || "未命名公司"} · ${item.title || "未填写岗位"}`;
+        option.selected = fact.source_span.startsWith(prefix);
+        owner.appendChild(option);
+      });
+    });
+
     const textarea = document.createElement("textarea");
     textarea.rows = 3;
     textarea.value = fact.text;
@@ -377,6 +518,8 @@ function renderFactCards() {
     source.className = "fact-source";
     source.textContent = fact.source_excerpt
       ? `原始内容：${fact.source_excerpt}`
+      : fact.source_type === "user"
+        ? "来源：用户补充，归属见上方经历选择。"
       : fact.source_span
         ? `来源位置：${fact.source_span}`
         : "来源：用户补充";
@@ -409,9 +552,13 @@ function renderFactCards() {
       checkbox.checked = false;
       updateConfirmationState();
     });
+    owner.addEventListener("change", () => {
+      checkbox.checked = false;
+      updateConfirmationState();
+    });
     checkbox.addEventListener("change", updateConfirmationState);
     footer.append(confirmLabel, deleteButton);
-    article.append(header, textarea, source, footer);
+    article.append(header, owner, textarea, source, footer);
     factCardList.appendChild(article);
   });
   updateConfirmationState();
@@ -700,6 +847,7 @@ async function copyText(value, successMessage) {
 async function getResponseError(response, fallback) {
   try {
     const payload = await response.json();
+    if (Array.isArray(payload.detail)) return payload.detail.map((item) => item.msg).join("；");
     return payload.detail || fallback;
   } catch (_error) {
     return fallback;
@@ -717,7 +865,7 @@ async function previewResumeExport() {
   try {
     const response = await fetch(`/api/v1/tailor-runs/${currentRunId}/export-preview`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: runRequestHeaders(),
       body: JSON.stringify({ draft: currentDraft, filename: sanitizeExportFilename(exportFilename.value) }),
     });
     if (!response.ok) throw new Error(await getResponseError(response, "分页预览生成失败。"));
@@ -763,7 +911,7 @@ async function downloadResumeExport(format, button) {
   try {
     const response = await fetch(`/api/v1/tailor-runs/${currentRunId}/export/${format}`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: runRequestHeaders(),
       body: JSON.stringify({ draft: currentDraft, filename }),
     });
     if (!response.ok) throw new Error(await getResponseError(response, "导出失败。"));
@@ -959,6 +1107,7 @@ function renderScoreExplanation(payload) {
 
 async function loadScoreExplanation() {
   if (!currentRunId || !currentDraft) return;
+  const requestedRunId = currentRunId;
   const requestedSnapshot = draftSnapshot();
   refreshScoreButton.disabled = true;
   scoreStatus.textContent = "正在计算原始简历与当前版本的分项对照…";
@@ -966,10 +1115,11 @@ async function loadScoreExplanation() {
   try {
     const response = await fetch(`/api/v1/tailor-runs/${currentRunId}/score`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: runRequestHeaders(),
       body: JSON.stringify({ draft: currentDraft }),
     });
     const payload = await response.json();
+    if (requestedRunId !== currentRunId) return;
     if (!response.ok) throw new Error(payload.detail || "评分计算失败。");
     if (requestedSnapshot !== draftSnapshot()) {
       scoreStatus.textContent = "计算期间内容已变化，请重新计算评分。";
@@ -985,9 +1135,10 @@ async function loadScoreExplanation() {
       ? "已按当前未保存内容计算；保存后会写入版本记录。"
       : "已按当前版本计算。";
   } catch (error) {
+    if (requestedRunId !== currentRunId) return;
     scoreStatus.textContent = error.message || "评分计算失败。";
   } finally {
-    refreshScoreButton.disabled = false;
+    if (requestedRunId === currentRunId) refreshScoreButton.disabled = false;
   }
 }
 
@@ -1223,16 +1374,24 @@ function decideDraftDiff(itemId, decision) {
 
 async function loadDraftDiff() {
   if (!currentRunId || !currentDraft) return;
+  const requestedRunId = currentRunId;
+  const requestedSnapshot = draftSnapshot();
   refreshDiffButton.disabled = true;
   diffSummary.textContent = "正在生成逐条差异…";
   try {
     const response = await fetch(`/api/v1/tailor-runs/${currentRunId}/draft-diff`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: runRequestHeaders(),
       body: JSON.stringify({ draft: currentDraft }),
     });
     const payload = await response.json();
+    if (requestedRunId !== currentRunId) return;
     if (!response.ok) throw new Error(payload.detail || "差异生成失败。");
+    if (requestedSnapshot !== draftSnapshot()) {
+      draftDiffIsStale = true;
+      diffSummary.textContent = "计算期间内容已变化，请刷新对比。";
+      return;
+    }
     draftDiff = payload;
     diffBaseDraft = cloneDraft(currentDraft);
     diffDecisions = Object.fromEntries(payload.items.map((item) => [item.id, "accepted"]));
@@ -1240,12 +1399,13 @@ async function loadDraftDiff() {
     updateDiffSummary();
     renderDraftDiff();
   } catch (error) {
+    if (requestedRunId !== currentRunId) return;
     draftDiff = null;
     draftDiffIsStale = false;
     diffSummary.textContent = error.message || "差异生成失败。";
     draftDiffList.innerHTML = "";
   } finally {
-    refreshDiffButton.disabled = false;
+    if (requestedRunId === currentRunId) refreshDiffButton.disabled = false;
   }
 }
 
@@ -1260,14 +1420,17 @@ function renderVersionOptions() {
     const option = document.createElement("option");
     option.value = version.id;
     const time = version.created_at ? new Date(version.created_at).toLocaleString() : "";
-    option.textContent = `${version.label}${time ? ` · ${time}` : ""}`;
+    option.textContent = `${version.label}${version.id === activeVersionId ? " · 当前" : ""}${version.archived ? " · 已归档" : ""}${time ? ` · ${time}` : ""}`;
     draftVersionSelect.appendChild(option);
   });
+  if (activeVersionId) draftVersionSelect.value = activeVersionId;
+  window.updateVersionManagement?.();
 }
 
 function applyReviewedVersion(version, versions) {
   currentDraft = cloneDraft(version.draft);
   draftVersions = versions || draftVersions;
+  activeVersionId = version.id;
   draftIsDirty = false;
   renderDraftEditor();
   renderVersionOptions();
@@ -1280,6 +1443,7 @@ function applyReviewedVersion(version, versions) {
   resetExportPreview();
   loadDraftDiff();
   loadScoreExplanation();
+  window.refreshRunHistory?.();
 }
 
 function initializeDraftEditor(result) {
@@ -1287,6 +1451,7 @@ function initializeDraftEditor(result) {
   currentCandidateProfile = result.candidate_profile || { basics: {} };
   currentDraft = cloneDraft(result.final_package.draft);
   draftVersions = result.draft_versions || [];
+  activeVersionId = result.active_version_id || draftVersions[draftVersions.length - 1]?.id || "";
   if (!draftVersions.length) {
     const latestReview = result.reviews[result.reviews.length - 1];
     draftVersions = [{
@@ -1311,7 +1476,7 @@ function initializeDraftEditor(result) {
   renderDraftEditor();
   renderVersionOptions();
   updateDraftHistoryButtons();
-  const latestVersion = draftVersions[draftVersions.length - 1];
+  const latestVersion = draftVersions.find((item) => item.id === activeVersionId) || draftVersions[draftVersions.length - 1];
   const risk = latestVersion.compliance_report?.risk_level || "low";
   editorRiskBanner.textContent = `真实性风险：${risk}；JD 匹配参考分：${latestVersion.ats_report?.score ?? "-"}。`;
   editorRiskBanner.className = `editor-risk-banner ${risk}`;
@@ -1326,13 +1491,15 @@ function initializeDraftEditor(result) {
 }
 
 async function saveCurrentDraft(label = "手工保存") {
+  if (draftMutationInProgress) return;
+  draftMutationInProgress = true;
   saveDraftButton.disabled = true;
   editorSaveStatus.textContent = "正在保存并重新审查…";
   try {
     const response = await fetch(`/api/v1/tailor-runs/${currentRunId}/draft`, {
       method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ draft: currentDraft, label }),
+      headers: runRequestHeaders(),
+      body: JSON.stringify({ draft: currentDraft, label: document.getElementById("version-label").value.trim() || label }),
     });
     const payload = await response.json();
     if (!response.ok) throw new Error(payload.detail || "保存失败。");
@@ -1340,11 +1507,14 @@ async function saveCurrentDraft(label = "手工保存") {
   } catch (error) {
     editorSaveStatus.textContent = error.message || "保存失败。";
   } finally {
+    draftMutationInProgress = false;
     saveDraftButton.disabled = false;
   }
 }
 
 async function rewriteDraftPart(targetType, sectionIndex, itemIndex, button) {
+  if (draftMutationInProgress) return;
+  draftMutationInProgress = true;
   const before = cloneDraft(currentDraft);
   button.disabled = true;
   button.textContent = "重写中…";
@@ -1352,7 +1522,7 @@ async function rewriteDraftPart(targetType, sectionIndex, itemIndex, button) {
   try {
     const response = await fetch(`/api/v1/tailor-runs/${currentRunId}/rewrite-part`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: runRequestHeaders(),
       body: JSON.stringify({
         draft: currentDraft,
         target_type: targetType,
@@ -1371,6 +1541,8 @@ async function rewriteDraftPart(targetType, sectionIndex, itemIndex, button) {
     editorSaveStatus.textContent = error.message || "局部重写失败。";
     button.disabled = false;
     button.textContent = "AI 重写";
+  } finally {
+    draftMutationInProgress = false;
   }
 }
 
@@ -1381,7 +1553,11 @@ function renderResult(result) {
   document.getElementById("ats-score").textContent = latestReview?.ats_report?.score ?? "-";
   document.getElementById("risk-level").textContent = latestReview?.compliance_report?.risk_level ?? "-";
   document.getElementById("hiring-track").textContent = humanizeHiringTrack(result.jd_profile?.hiring_track);
-  document.getElementById("stop-reason").textContent = result.stop_reason || "-";
+  document.getElementById("stop-reason").textContent = {
+    quality_threshold_met: "达到优化标准",
+    max_iterations_reached: "达到设定轮数",
+    score_plateau: "匹配分变化较小",
+  }[result.stop_reason] || "生成完成";
   document.getElementById("fit-summary").textContent = result.final_package.fit_summary || "";
   initializeDraftEditor(result);
   document.getElementById("jd-review-doc").textContent = result.final_package.jd_review_doc?.markdown || "";
@@ -1459,7 +1635,30 @@ function updateProgressView(value, stageKey = "queued", statusMessage = "") {
   });
 }
 
+function renderStageHistory(records) {
+  stageHistoryList.innerHTML = "";
+  if (!records?.length) {
+    stageHistoryList.textContent = "尚无已完成阶段。";
+    return;
+  }
+  records.forEach((record) => {
+    const item = document.createElement("div");
+    item.className = `stage-history-item ${record.status}`;
+    const label = document.createElement("strong");
+    label.textContent = getStageLabel(record.stage);
+    const meta = document.createElement("span");
+    const duration = record.duration_ms ? `${(record.duration_ms / 1000).toFixed(1)} 秒` : "未记录耗时";
+    meta.textContent = record.status === "failed"
+      ? `第 ${record.attempt} 次尝试 · 失败`
+      : `第 ${record.attempt} 次尝试 · ${duration}`;
+    item.append(label, meta);
+    stageHistoryList.appendChild(item);
+  });
+}
+
 function startWaitingExperience(jdText) {
+  runIsBusy = true;
+  syncArchiveControls();
   resultRoot.classList.add("hidden");
   resultPlaceholder.classList.add("hidden");
   waitingPanel.classList.remove("hidden");
@@ -1478,9 +1677,17 @@ function startWaitingExperience(jdText) {
   renderCurrentTip();
   renderTipsTicker(tipItems);
   updateProgressView(5, "queued", "任务已创建，准备开始。");
+  cancelRunButton.classList.remove("hidden");
+  cancelRunButton.disabled = false;
+  retryRunButton.classList.add("hidden");
+  jobAttemptStatus.textContent = "等待持久化队列调度。";
+  renderStageHistory([]);
 }
 
 function stopWaitingExperience(success = false) {
+  runIsBusy = false;
+  syncArchiveControls();
+  window.refreshRunHistory?.();
   if (pollTimer) {
     window.clearTimeout(pollTimer);
     pollTimer = null;
@@ -1491,13 +1698,26 @@ function stopWaitingExperience(success = false) {
 }
 
 function applyJobStatus(job) {
+  document.getElementById("editor-job-context").textContent = `当前任务：${job.target_company || "未填写公司"} · ${job.target_job_title || job.result?.jd_profile?.job_title || "待识别岗位"}`;
+  document.getElementById("current-task-jd").textContent = job.jd_text || "此旧任务未保留完整 JD，请参考岗位分析。";
   updateProgressView(job.progress_percent ?? 0, job.current_stage || "queued", job.status_message || "");
   if (job.review_cards?.length) {
     maybeUpdateReviewCards(job.review_cards);
   }
   if (job.status === "running" || job.status === "queued") {
     setStatus(job.status_message || "任务运行中，请稍候。", "loading");
+    cancelRunButton.classList.remove("hidden");
+    retryRunButton.classList.add("hidden");
+    jobAttemptStatus.textContent = `第 ${Math.max(1, job.attempt_count || 1)} / ${job.max_attempts || 3} 次尝试；页面刷新后仍可继续查看。`;
+  } else if (job.status === "failed" || job.status === "cancelled") {
+    cancelRunButton.classList.add("hidden");
+    retryRunButton.classList.toggle("hidden", !job.retryable);
+    const failedStage = job.failed_stage ? getStageLabel(job.failed_stage) : "当前阶段";
+    jobAttemptStatus.textContent = job.status === "cancelled"
+      ? "任务已取消，可从最近完成阶段继续。"
+      : `${failedStage}执行失败；已保留此前阶段结果。`;
   }
+  renderStageHistory(job.stage_history || []);
 }
 
 function maybeUpdateReviewCards(cards) {
@@ -1532,8 +1752,12 @@ function showNextTip() {
 }
 
 async function pollRunStatus(runId, startedAt = Date.now()) {
-  const response = await fetch(`/api/v1/tailor-runs/${runId}/status`);
+  if (runId !== currentRunId) throw new Error("任务已切换或删除。");
+  const response = await fetch(`/api/v1/tailor-runs/${runId}/status`, {
+    headers: runRequestHeaders(false),
+  });
   const job = await response.json();
+  if (runId !== currentRunId) throw new Error("任务已切换或删除。");
   if (!response.ok) {
     throw new Error(job.detail || "任务状态获取失败。");
   }
@@ -1541,10 +1765,14 @@ async function pollRunStatus(runId, startedAt = Date.now()) {
   applyJobStatus(job);
 
   if (job.status === "completed") {
+    cancelRunButton.classList.add("hidden");
+    retryRunButton.classList.add("hidden");
     return job.result;
   }
-  if (job.status === "failed") {
-    throw new Error(job.error_message || "任务执行失败。");
+  if (job.status === "failed" || job.status === "cancelled") {
+    const error = new Error(job.error_message || (job.status === "cancelled" ? "任务已取消。" : "任务执行失败。"));
+    error.recoverable = true;
+    throw error;
   }
   if (Date.now() - startedAt > 5 * 60 * 1000) {
     throw new Error("等待时间过长，请稍后刷新页面查看结果。");
@@ -1559,8 +1787,12 @@ async function pollRunStatus(runId, startedAt = Date.now()) {
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
+  if (runIsBusy || draftMutationInProgress || draftIsDirty) {
+    setStatus("请先完成当前任务并保存编辑，再准备新的任务。", "error");
+    return;
+  }
   const fileInput = document.getElementById("resume-file");
-  if (!fileInput.files || !fileInput.files[0]) {
+  if (!selectedArchive && (!fileInput.files || !fileInput.files[0])) {
     setStatus("请先选择简历文件。", "error");
     return;
   }
@@ -1570,32 +1802,55 @@ form.addEventListener("submit", async (event) => {
     return;
   }
 
+  if (!privacyConsent.checked) {
+    setStatus("请先阅读并同意隐私与数据说明。", "error");
+    return;
+  }
+
+  if (!selectedArchive && fileInput.files[0].size > currentMaxUploadBytes) {
+    const maxMb = Math.max(1, Math.floor(currentMaxUploadBytes / (1024 * 1024)));
+    setStatus(`简历文件不能超过 ${maxMb} MB。`, "error");
+    return;
+  }
+
   const formData = new FormData();
-  formData.append("resume_file", fileInput.files[0]);
+  if (!selectedArchive) formData.append("resume_file", fileInput.files[0]);
   formData.append("candidate_notes", document.getElementById("candidate-notes").value);
   formData.append("jd_text", document.getElementById("jd-text").value);
 
   submitButton.disabled = true;
+  runIsBusy = true;
+  syncArchiveControls();
   setStatus("正在解析简历并提取可追溯事实，请稍候。", "loading");
   confirmationPanel.classList.add("hidden");
   resultRoot.classList.add("hidden");
   resultPlaceholder.classList.remove("hidden");
 
   try {
-    const response = await fetch("/api/v1/resume/parse-upload", {
+    const archive = selectedArchive;
+    const response = await fetch(archive ? `/api/v1/candidate-profiles/${archive.id}/preview` : "/api/v1/resume/parse-upload", {
       method: "POST",
-      body: formData,
+      headers: archive ? archiveRequestHeaders() : {},
+      body: archive ? JSON.stringify({
+        jd_text: document.getElementById("jd-text").value,
+        expected_revision: archive.revision,
+      }) : formData,
     });
-    const payload = await response.json();
     if (!response.ok) {
-      throw new Error(payload.detail || "简历解析失败，请稍后重试。");
+      throw new Error(await getResponseError(response, "资料准备失败，请稍后重试。"));
     }
+    const payload = await response.json();
+    editingArchiveId = archive?.id || "";
+    document.getElementById("archive-label").value = archive?.label || "基础档案";
+    archiveStorageConsent.checked = false;
     renderConfirmation(payload);
     setStatus("解析完成。请确认基本信息、经历结构和事实卡后再开始生成。", "success");
   } catch (error) {
     setStatus(error.message || "解析失败，请检查文件格式或后端配置。", "error");
   } finally {
     submitButton.disabled = false;
+    runIsBusy = false;
+    syncArchiveControls();
   }
 });
 
@@ -1639,6 +1894,7 @@ backToUploadButton.addEventListener("click", () => {
   form.classList.remove("hidden");
   document.body.classList.remove("review-mode");
   setStatus("可以修改上传材料或候选人备注后重新解析。", "muted");
+  syncArchiveControls();
 });
 
 confirmGenerateButton.addEventListener("click", async () => {
@@ -1660,6 +1916,14 @@ confirmGenerateButton.addEventListener("click", async () => {
     setStatus("请先确认基本信息和经历结构。", "error");
     return;
   }
+  if (!document.getElementById("jd-text").value.trim()) {
+    setStatus("请返回材料页填写目标 JD；也可以先保存基础档案。", "error");
+    return;
+  }
+  if (editingArchiveId && !archiveStorageConsent.checked) {
+    setStatus("复用档案前，请同意保存这次确认的资料。", "error");
+    return;
+  }
 
   const requestPayload = {
     resume_text: previewData.resume_text,
@@ -1671,6 +1935,8 @@ confirmGenerateButton.addEventListener("click", async () => {
     confirmed_candidate_profile: collectCandidateProfile(),
     confirmed_fact_cards: confirmedFacts,
     preanalyzed_jd_profile: previewData.jd_profile,
+    target_company: document.getElementById("target-company").value.trim(),
+    target_role: document.getElementById("target-role").value.trim(),
   };
 
   confirmGenerateButton.disabled = true;
@@ -1680,24 +1946,49 @@ confirmGenerateButton.addEventListener("click", async () => {
   startWaitingExperience(requestPayload.jd_text);
 
   try {
-    const response = await fetch("/api/v1/tailor-runs/confirmed-jobs", {
+    let archive = null;
+    if (editingArchiveId) archive = await saveConfirmedArchive(confirmedFacts);
+    const response = await fetch(archive ? `/api/v1/candidate-profiles/${archive.id}/jobs` : "/api/v1/tailor-runs/confirmed-jobs", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(requestPayload),
+      headers: {
+        ...(archive ? archiveRequestHeaders() : { "Content-Type": "application/json" }),
+        "Idempotency-Key": createIdempotencyKey(),
+      },
+      body: JSON.stringify(archive ? {
+        jd_text: requestPayload.jd_text,
+        candidate_notes: requestPayload.candidate_notes,
+        output_language: requestPayload.output_language,
+        max_iterations: requestPayload.max_iterations,
+        expected_revision: archive.revision,
+        preanalyzed_jd_profile: requestPayload.preanalyzed_jd_profile,
+        target_company: requestPayload.target_company,
+        target_role: requestPayload.target_role,
+      } : requestPayload),
     });
-    const payload = await response.json();
     if (!response.ok) {
-      throw new Error(payload.detail || "请求失败，请稍后重试。");
+      throw new Error(await getResponseError(response, "请求失败，请稍后重试。"));
+    }
+    const payload = await response.json();
+    currentRunId = payload.run_id;
+    currentRunToken = payload.access_token || "";
+    currentRunExpiresAt = payload.expires_at || "";
+    persistActiveRun();
+    if (currentRunExpiresAt) {
+      taskRetention.textContent = `本次匿名任务预计在 ${new Date(currentRunExpiresAt).toLocaleString()} 自动删除，也可现在立即删除。`;
     }
     applyJobStatus(payload);
     const result = await pollRunStatus(payload.run_id);
     renderResult(result);
     setStatus("已根据你确认的事实生成定制简历。", "success");
     stopWaitingExperience(true);
+    if (archive) await refreshArchiveUsage();
   } catch (error) {
     stopWaitingExperience(false);
-    waitingPanel.classList.add("hidden");
-    confirmationPanel.classList.remove("hidden");
+    if (!currentRunId && !previewData) return;
+    if (!error.recoverable) {
+      waitingPanel.classList.add("hidden");
+      confirmationPanel.classList.remove("hidden");
+    }
     setStatus(error.message || "请求失败，请检查后端配置。", "error");
     updateConfirmationState();
   }
@@ -1725,17 +2016,26 @@ redoDraftButton.addEventListener("click", () => {
 
 saveDraftButton.addEventListener("click", () => saveCurrentDraft());
 
-restoreVersionButton.addEventListener("click", () => {
+restoreVersionButton.addEventListener("click", async () => {
   const version = draftVersions.find((item) => item.id === draftVersionSelect.value);
   if (!version || !currentDraft) return;
-  undoStack.push(cloneDraft(currentDraft));
-  redoStack = [];
-  currentDraft = cloneDraft(version.draft);
-  currentDraft.markdown = buildDraftMarkdown(currentDraft);
-  renderDraftEditor();
-  markDraftDirty();
-  editorSaveStatus.textContent = `已恢复“${version.label}”，保存后将设为当前版本。`;
-  updateDraftHistoryButtons();
+  if (draftIsDirty || draftMutationInProgress) {
+    editorSaveStatus.textContent = "请先保存当前编辑，再恢复历史版本。";
+    return;
+  }
+  restoreVersionButton.disabled = true;
+  draftMutationInProgress = true;
+  try {
+    const response = await fetch(`/api/v1/tailor-runs/${currentRunId}/draft-versions/${version.id}/restore`, {method: "POST", headers: runRequestHeaders(false)});
+    if (!response.ok) throw new Error(await getResponseError(response, "恢复版本失败。"));
+    const payload = await response.json();
+    undoStack.push(cloneDraft(currentDraft));
+    redoStack = [];
+    applyReviewedVersion(payload.version, payload.versions);
+    editorSaveStatus.textContent = `已恢复“${version.label}”，刷新页面后仍使用此版本。`;
+    updateDraftHistoryButtons();
+  } catch (error) { editorSaveStatus.textContent = error.message; }
+  finally { restoreVersionButton.disabled = false; draftMutationInProgress = false; }
 });
 
 refreshDiffButton.addEventListener("click", loadDraftDiff);
@@ -1752,9 +2052,393 @@ exportPdfButton.addEventListener("click", () => downloadResumeExport("pdf", expo
 exportFilename.addEventListener("blur", () => {
   exportFilename.value = sanitizeExportFilename(exportFilename.value);
 });
+
+deleteRunButton.addEventListener("click", async () => {
+  if (!currentRunId || !currentRunToken) return;
+  if (draftMutationInProgress) {
+    setStatus("请等待当前版本操作完成，再删除任务。", "error");
+    return;
+  }
+  if (!window.confirm("删除后无法恢复本次任务、结果和历史版本。确定立即删除吗？")) return;
+  deleteRunButton.disabled = true;
+  try {
+    const response = await fetch(`/api/v1/tailor-runs/${currentRunId}`, {
+      method: "DELETE",
+      headers: runRequestHeaders(false),
+    });
+    if (!response.ok) throw new Error(await getResponseError(response, "任务删除失败。"));
+    window.forgetHistoryRun?.(currentRunId);
+    if (exportPreviewUrl) URL.revokeObjectURL(exportPreviewUrl);
+    previewData = null;
+    currentRunId = "";
+    currentRunToken = "";
+    currentRunExpiresAt = "";
+    clearActiveRun();
+    stopWaitingExperience(false);
+    waitingPanel.classList.add("hidden");
+    confirmationPanel.classList.add("hidden");
+    document.body.classList.remove("review-mode");
+    form.classList.remove("hidden");
+    currentDraft = null;
+    draftVersions = [];
+    undoStack = [];
+    redoStack = [];
+    resultRoot.classList.add("hidden");
+    resultPlaceholder.classList.remove("hidden");
+    resultPlaceholder.textContent = "本次任务数据已删除，无法再通过原任务链接访问。";
+    form.reset();
+    setStatus("本次任务及其结果已永久删除。", "success");
+  } catch (error) {
+    setStatus(error.message || "任务删除失败，请稍后重试。", "error");
+  } finally {
+    deleteRunButton.disabled = false;
+  }
+});
+
+cancelRunButton.addEventListener("click", async () => {
+  if (!currentRunId || !currentRunToken) return;
+  cancelRunButton.disabled = true;
+  try {
+    const response = await fetch(`/api/v1/tailor-runs/${currentRunId}/cancel`, {
+      method: "POST",
+      headers: runRequestHeaders(false),
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.detail || "取消任务失败。");
+    stopWaitingExperience(false);
+    applyJobStatus(payload);
+    setStatus("任务已取消，已完成阶段的进度仍然保留。", "muted");
+  } catch (error) {
+    setStatus(error.message || "取消任务失败。", "error");
+  } finally {
+    cancelRunButton.disabled = false;
+  }
+});
+
+retryRunButton.addEventListener("click", async () => {
+  if (!currentRunId || !currentRunToken) return;
+  retryRunButton.disabled = true;
+  try {
+    const response = await fetch(`/api/v1/tailor-runs/${currentRunId}/retry`, {
+      method: "POST",
+      headers: runRequestHeaders(false),
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.detail || "任务重试失败。");
+    applyJobStatus(payload);
+    setStatus("任务已重新排队，将从最近失败阶段继续。", "loading");
+    const result = await pollRunStatus(currentRunId);
+    renderResult(result);
+    setStatus("任务恢复成功，定制简历已生成。", "success");
+    stopWaitingExperience(true);
+  } catch (error) {
+    if (!error.recoverable) setStatus(error.message || "任务重试失败。", "error");
+  } finally {
+    retryRunButton.disabled = false;
+  }
+});
 window.addEventListener("beforeunload", () => {
   if (exportPreviewUrl) URL.revokeObjectURL(exportPreviewUrl);
 });
 
 tipPrev.addEventListener("click", showPreviousTip);
 tipNext.addEventListener("click", showNextTip);
+loadPrivacySummary();
+
+async function resumeSavedRun() {
+  let saved;
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const linkedRun = params.get("run");
+    const linkedProfile = params.get("profile");
+    if (linkedRun && linkedProfile) {
+      const credentials = JSON.parse(localStorage.getItem("noworrycv-candidate-archives") || "[]");
+      const credential = credentials.find((item) => item.id === linkedProfile);
+      if (!credential) throw new Error("请在当前浏览器连接该基础档案后再编辑插件简历。");
+      const response = await fetch(`/api/v1/tailor-runs/${encodeURIComponent(linkedRun)}/status`, {
+        headers: { "X-Run-Token": credential.token },
+      });
+      if (!response.ok) throw new Error("此生成任务已过期或不可访问；已确认简历仍可在插件下载。");
+      const job = await response.json();
+      sessionStorage.setItem("noworrycv-active-run", JSON.stringify({
+        runId: linkedRun, token: credential.token, expiresAt: job.expires_at,
+      }));
+      history.replaceState(null, "", window.location.pathname);
+    }
+    saved = JSON.parse(sessionStorage.getItem("noworrycv-active-run") || "null");
+  } catch (error) {
+    clearActiveRun();
+    setStatus(error.message || "无法恢复任务。", "error");
+    return;
+  }
+  if (!saved?.runId || !saved?.token) return;
+  if (saved.expiresAt && new Date(saved.expiresAt).getTime() <= Date.now()) {
+    clearActiveRun();
+    return;
+  }
+  currentRunId = saved.runId;
+  currentRunToken = saved.token;
+  currentRunExpiresAt = saved.expiresAt || "";
+  startWaitingExperience("");
+  form.classList.add("hidden");
+  setStatus("正在恢复上次任务进度。", "loading");
+  try {
+    const result = await pollRunStatus(currentRunId);
+    renderResult(result);
+    setStatus("已恢复上次任务结果。", "success");
+    stopWaitingExperience(true);
+  } catch (error) {
+    if (!error.recoverable) {
+      clearActiveRun();
+      currentRunId = "";
+      currentRunToken = "";
+      waitingPanel.classList.add("hidden");
+      form.classList.remove("hidden");
+      setStatus("上次任务已过期或不存在，可以重新上传。", "muted");
+    } else {
+      setStatus(error.message || "上次任务需要重试。", "error");
+    }
+  }
+}
+
+function archiveRequestHeaders(json = true) {
+  const credential = archiveCredentials.find((item) => item.id === (editingArchiveId || archiveSelect.value));
+  const headers = json ? { "Content-Type": "application/json" } : {};
+  if (credential) headers["X-Profile-Token"] = credential.token;
+  return headers;
+}
+
+function persistArchiveCredentials() {
+  localStorage.setItem("noworrycv-candidate-archives", JSON.stringify(archiveCredentials));
+}
+
+function renderArchiveOptions(selectedId = archiveSelect.value) {
+  archiveSelect.replaceChildren();
+  const upload = document.createElement("option");
+  upload.value = "";
+  upload.textContent = "上传新的简历";
+  archiveSelect.appendChild(upload);
+  archiveCredentials.forEach((credential) => {
+    const option = document.createElement("option");
+    option.value = credential.id;
+    option.textContent = credential.label;
+    archiveSelect.appendChild(option);
+  });
+  archiveSelect.value = selectedId;
+}
+
+function syncArchiveControls() {
+  const hasArchive = Boolean(selectedArchive && archiveSelect.value);
+  editArchiveButton.disabled = !hasArchive || archiveSaving || runIsBusy;
+  newArchiveJobButton.disabled = !hasArchive || archiveSaving || runIsBusy;
+  exportArchiveButton.disabled = !hasArchive || archiveSaving;
+  deleteArchiveButton.disabled = !hasArchive || archiveSaving || runIsBusy;
+  archiveSelect.disabled = archiveSaving || runIsBusy;
+  document.getElementById("resume-file").required = !hasArchive;
+  document.getElementById("resume-file-field").classList.toggle("hidden", hasArchive);
+  submitButton.textContent = hasArchive ? "复用档案并确认目标 JD" : "解析简历并确认";
+  document.getElementById("archive-status").textContent = hasArchive
+    ? `${selectedArchive.label} · 资料版本 ${selectedArchive.revision} · ${selectedArchive.fact_cards.length} 条已确认事实`
+    : "上传并确认资料后，可保存为基础档案。";
+}
+
+async function refreshArchiveUsage() {
+  const list = document.getElementById("archive-usage");
+  list.replaceChildren();
+  if (!selectedArchive) return;
+  let response;
+  try {
+    response = await fetch(`/api/v1/candidate-profiles/${selectedArchive.id}/usage`, { headers: archiveRequestHeaders(false) });
+  } catch (_error) {
+    document.getElementById("archive-status").textContent += "；版本引用暂时无法载入。";
+    return;
+  }
+  if (!response.ok) return;
+  const usage = await response.json();
+  usage.runs.forEach((run) => {
+    const li = document.createElement("li");
+    li.classList.toggle("affected", run.affected);
+    const state = { completed: "已完成", failed: "失败", queued: "排队", running: "运行中", cancelled: "已取消" };
+    li.textContent = `${run.job_title || "定制任务"} · ${state[run.status] || run.status} · 资料版本 ${run.profile_revision}${run.affected ? "：基础资料已更新，建议复核或重新生成；原版本保留生成时的事实。" : "：使用当前资料。"}`;
+    list.appendChild(li);
+  });
+}
+
+async function loadSelectedArchive() {
+  const archiveId = archiveSelect.value;
+  editingArchiveId = "";
+  selectedArchive = null;
+  syncArchiveControls();
+  if (!archiveId) {
+    document.getElementById("archive-usage").replaceChildren();
+    return;
+  }
+  const response = await fetch(`/api/v1/candidate-profiles/${archiveId}`, { headers: archiveRequestHeaders(false) });
+  if (!response.ok) throw new Error(await getResponseError(response, "无法载入基础档案。"));
+  const archive = await response.json();
+  if (archiveSelect.value !== archiveId) return;
+  selectedArchive = archive;
+  syncArchiveControls();
+  await refreshArchiveUsage();
+}
+
+async function saveConfirmedArchive(confirmedFacts = null) {
+  if (!profileConfirmed.checked || !archiveStorageConsent.checked) throw new Error("请确认资料准确并同意保存基础档案。");
+  // Ensure the browser can retain the only credential before creating the archive.
+  try {
+    localStorage.setItem("noworrycv-storage-check", "ok");
+    localStorage.removeItem("noworrycv-storage-check");
+  } catch (_error) {
+    throw new Error("当前浏览器无法保存档案访问凭据，请启用本站的本地存储后再试。");
+  }
+  archiveSaving = true;
+  updateConfirmationState();
+  syncArchiveControls();
+  try {
+    const archiveId = editingArchiveId;
+    const payload = {
+      label: document.getElementById("archive-label").value.trim(),
+      candidate_profile: collectCandidateProfile(),
+      fact_cards: confirmedFacts || [...collectFactCards(), ...buildFactsFromFollowUpAnswers()],
+      confirmed: true,
+      storage_consent: true,
+      expected_revision: archiveId ? selectedArchive.revision : null,
+    };
+    const response = await fetch(`/api/v1/candidate-profiles${archiveId ? `/${archiveId}` : ""}`, {
+      method: archiveId ? "PUT" : "POST",
+      headers: archiveRequestHeaders(), body: JSON.stringify(payload),
+    });
+    if (!response.ok) throw new Error(await getResponseError(response, "基础档案保存失败。"));
+    const archive = await response.json();
+    const previous = archiveCredentials.find((item) => item.id === archive.id);
+    archiveCredentials = archiveCredentials.filter((item) => item.id !== archive.id);
+    archiveCredentials.push({ id: archive.id, token: archive.access_token || previous.token, label: archive.label });
+    persistArchiveCredentials();
+    selectedArchive = archive;
+    editingArchiveId = archive.id;
+    renderArchiveOptions(archive.id);
+    // Merge confirmed answers into cards so a second save cannot add them twice.
+    previewData.candidate_profile = archive.candidate_profile;
+    previewData.fact_cards = archive.fact_cards;
+    renderFollowUpQuestions([]);
+    renderStructuredProfile(archive.candidate_profile);
+    renderFactCards();
+    archiveSaveStatus.textContent = `已保存「${archive.label}」，资料版本 ${archive.revision}。后续可直接复用。`;
+    await refreshArchiveUsage();
+    return archive;
+  } finally {
+    archiveSaving = false;
+    syncArchiveControls();
+    updateConfirmationState();
+  }
+}
+
+archiveStorageConsent.addEventListener("change", updateConfirmationState);
+saveArchiveButton.addEventListener("click", async () => {
+  try { await saveConfirmedArchive(); }
+  catch (error) { archiveSaveStatus.textContent = error.message; }
+});
+
+archiveSelect.addEventListener("change", async () => {
+  if (runIsBusy || draftMutationInProgress || draftIsDirty) {
+    archiveSelect.value = selectedArchive?.id || "";
+    setStatus("请先等待当前任务结束，并保存编辑内容，再切换基础资料。", "error");
+    return;
+  }
+  try {
+    await loadSelectedArchive();
+    previewData = null;
+    confirmationPanel.classList.add("hidden");
+    form.classList.remove("hidden");
+    document.body.classList.remove("review-mode");
+  } catch (error) { setStatus(error.message, "error"); }
+});
+
+editArchiveButton.addEventListener("click", async () => {
+  if (runIsBusy || draftMutationInProgress || draftIsDirty) {
+    setStatus("请先等待当前任务结束，并保存编辑内容，再维护基础档案。", "error");
+    return;
+  }
+  try {
+    await loadSelectedArchive();
+    editingArchiveId = selectedArchive.id;
+    document.getElementById("archive-label").value = selectedArchive.label;
+    archiveStorageConsent.checked = false;
+    renderConfirmation({ candidate_profile: selectedArchive.candidate_profile,
+      fact_cards: selectedArchive.fact_cards, resume_text: "", follow_up_questions: [] });
+    setStatus("维护基础资料后请重新确认并保存；已有简历保留原事实快照。", "muted");
+  } catch (error) { setStatus(error.message, "error"); }
+});
+
+newArchiveJobButton.addEventListener("click", async () => {
+  if (runIsBusy || draftMutationInProgress || draftIsDirty) {
+    setStatus("请先等待当前任务结束，并保存编辑内容，再创建新任务。", "error");
+    return;
+  }
+  try {
+    await loadSelectedArchive();
+    previewData = null;
+    confirmationPanel.classList.add("hidden");
+    form.classList.remove("hidden");
+    waitingPanel.classList.add("hidden");
+    document.body.classList.remove("review-mode");
+    document.getElementById("jd-text").value = "";
+    document.getElementById("target-company").value = "";
+    document.getElementById("target-role").value = "";
+    document.getElementById("jd-text").focus();
+    setStatus("基础档案已就绪，填写新的 JD 后即可复用。", "muted");
+  } catch (error) { setStatus(error.message, "error"); }
+});
+
+exportArchiveButton.addEventListener("click", async () => {
+  exportArchiveButton.disabled = true;
+  try {
+    const response = await fetch(`/api/v1/candidate-profiles/${selectedArchive.id}/export`, { headers: archiveRequestHeaders(false) });
+    if (!response.ok) throw new Error(await getResponseError(response, "档案导出失败。"));
+    const url = URL.createObjectURL(await response.blob());
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "candidate-profile.json";
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  } catch (error) { setStatus(error.message, "error"); }
+  finally { syncArchiveControls(); }
+});
+
+deleteArchiveButton.addEventListener("click", async () => {
+  if (!selectedArchive || archiveSaving) return;
+  if (!window.confirm("删除基础档案后不能再复用；已生成的任务保留各自快照，仍可在任务页单独删除。确定删除吗？")) return;
+  deleteArchiveButton.disabled = true;
+  try {
+    const archiveId = selectedArchive.id;
+    const response = await fetch(`/api/v1/candidate-profiles/${archiveId}`, { method: "DELETE", headers: archiveRequestHeaders(false) });
+    if (!response.ok) throw new Error(await getResponseError(response, "档案删除失败。"));
+    archiveCredentials = archiveCredentials.filter((item) => item.id !== archiveId);
+    persistArchiveCredentials();
+    selectedArchive = null;
+    editingArchiveId = "";
+    renderArchiveOptions("");
+    syncArchiveControls();
+    document.getElementById("archive-usage").replaceChildren();
+    confirmationPanel.classList.add("hidden");
+    document.body.classList.remove("review-mode");
+    form.classList.remove("hidden");
+    setStatus("基础档案已删除，已有任务可在结果页单独删除。", "success");
+  } catch (error) { setStatus(error.message, "error"); }
+  finally { syncArchiveControls(); }
+});
+
+async function initializeArchives() {
+  try {
+    const saved = JSON.parse(localStorage.getItem("noworrycv-candidate-archives") || "[]");
+    archiveCredentials = Array.isArray(saved) ? saved.filter((item) => item.id && item.token && item.label) : [];
+    renderArchiveOptions(archiveCredentials[0]?.id || "");
+    await loadSelectedArchive();
+  } catch (error) {
+    document.getElementById("archive-status").textContent = error.message || "当前浏览器无法载入基础档案。";
+  }
+  window.refreshRunHistory?.();
+}
+
+initializeArchives();
+resumeSavedRun();

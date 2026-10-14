@@ -1,0 +1,12 @@
+{
+  "manifest_version": 3,
+  "name": "NoWorryCV 投递助手",
+  "version": "0.2.0",
+  "minimum_chrome_version": "116",
+  "description": "识别岗位、微调简历、确认后填写招聘表单并保存投递版本。",
+  "permissions": ["activeTab", "scripting", "storage", "sidePanel"],
+  "host_permissions": ["http://*/*", "https://*/*"],
+  "action": {"default_title": "打开 NoWorryCV 投递助手"},
+  "side_panel": {"default_path": "panel.html"},
+  "background": {"service_worker": "background.js"}
+}

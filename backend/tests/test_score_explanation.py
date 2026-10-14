@@ -93,6 +93,7 @@ def test_score_api_compares_original_and_current_draft() -> None:
 
     response = TestClient(create_app()).post(
         "/api/v1/tailor-runs/{0}/score".format(completed.run_id),
+        headers={"X-Run-Token": completed.access_token},
         json={"draft": draft.model_dump(mode="json")},
     )
 

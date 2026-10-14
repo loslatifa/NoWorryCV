@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>NoWorryCV 投递助手</title><link rel="stylesheet" href="panel.css"></head>
+<body><main>
+  <header><small>NoWorryCV × JobAutoAgent</small><h1>投递助手</h1><p>让真实经历贴合岗位，再填入申请表。</p></header>
+  <p id="status" role="status" aria-live="polite">正在连接基础档案…</p>
+  <section><h2>1 · 连接基础档案</h2>
+    <label>服务地址<input id="api-base" value="http://127.0.0.1:8000" type="url"></label>
+    <div class="row"><button id="open-app">打开 NoWorryCV</button><button id="connect">读取网页已保存档案</button></div>
+    <label>选择档案<select id="profiles"><option value="">请先连接档案</option></select></label>
+    <label><input id="auto-generate" type="checkbox" checked> 打开助手时，识别到岗位与申请表后自动生成微调简历</label>
+    <p class="hint">先在 NoWorryCV 网页上传并确认资料、保存基础档案。插件从同一服务的已打开网页读取连接信息。</p>
+  </section>
+  <section><h2>2 · 识别并检查岗位</h2><p id="page" class="hint"></p>
+    <div class="row"><button id="detect">识别当前页面</button><button id="reuse-job">沿用上次识别岗位</button></div>
+    <p id="job-source" class="hint"></p>
+    <label>公司<input id="company" maxlength="120"></label><label>职位<input id="role" maxlength="120"></label>
+    <label>岗位要求<textarea id="jd" rows="7" placeholder="识别结果可编辑；也可以粘贴岗位职责和任职要求。"></textarea></label>
+    <button id="generate" class="primary">根据当前档案生成微调简历</button>
+  </section>
+  <section id="review" hidden><h2>3 · 检查简历与填写内容</h2>
+    <p id="changes"></p><p id="risks" class="warning"></p>
+    <details open><summary>微调简历</summary><pre id="draft"></pre></details>
+    <button id="edit-draft">在 NoWorryCV 中编辑此版本</button>
+    <label><input id="expand" type="checkbox"> 准备预览时，自动新增缺少的项目、实习和教育区块</label>
+    <button id="prepare">重新检测并准备填写预览</button>
+    <p id="plan" class="hint"></p><div id="mappings"></div>
+    <label>简历附件字段<select id="upload"><option value="">不自动上传附件</option></select></label>
+    <label>附件格式<select id="format"><option value="pdf">PDF</option><option value="docx">DOCX</option></select></label>
+    <label><input id="consent" type="checkbox"> 我已检查简历和填写预览，同意长期保存本次岗位、简历版本及填写结果，可随时删除</label>
+    <button id="confirm-fill" class="primary" disabled>确认简历、保存并填写</button>
+    <div class="row"><button id="download">下载已确认简历</button><button id="undo">撤销本页填写</button></div>
+    <p id="report" class="hint"></p>
+  </section>
+  <section><h2>已保存的投递版本</h2><button id="history-refresh">刷新记录</button><div id="history"></div></section>
+  <footer>填写后请检查必填项和附件，再手动点击招聘页面的提交按钮。</footer>
+</main><script src="panel.js"></script></body></html>

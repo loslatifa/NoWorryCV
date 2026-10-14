@@ -36,11 +36,55 @@
         <section class="panel input-panel">
           <div class="section-title">
             <p>Step 1</p>
-            <h2>上传基础材料</h2>
+            <h2>准备基础材料</h2>
           </div>
 
+          <section class="archive-panel" aria-labelledby="archive-title">
+            <h3 id="archive-title">基础档案与事实库</h3>
+            <p class="review-help">保存一次已确认资料，之后更换 JD 即可复用。档案会保留至你主动删除，访问凭据保存在当前浏览器。</p>
+            <label class="field compact">
+              <span>本次使用的基础资料</span>
+              <select id="archive-select"><option value="">上传新的简历</option></select>
+            </label>
+            <div class="archive-actions">
+              <button id="new-archive-job-button" type="button" class="secondary-button" disabled>用档案创建新 JD 任务</button>
+              <button id="edit-archive-button" type="button" class="secondary-button" disabled>维护档案</button>
+              <button id="export-archive-button" type="button" class="secondary-button" disabled>导出档案 JSON</button>
+              <button id="delete-archive-button" type="button" class="danger-button" disabled>删除基础档案</button>
+            </div>
+            <p id="archive-status" class="review-help" role="status">尚未保存基础档案。</p>
+            <ul id="archive-usage" class="archive-usage"></ul>
+          </section>
+
+          <section class="history-panel" aria-labelledby="history-title">
+            <h3 id="history-title">任务历史</h3>
+            <p class="review-help">查看本浏览器保存的任务，以及基础档案关联的任务。归档只整理列表，不延长数据保存期限。</p>
+            <label class="field compact"><span>搜索公司、岗位或 JD</span><input id="history-search" type="search" maxlength="200" placeholder="例如：产品经理、SQL" /></label>
+            <div class="history-filters">
+              <label class="field compact"><span>任务状态</span><select id="history-status-filter"><option value="all">全部状态</option><option value="completed">已完成</option><option value="running">运行中</option><option value="queued">排队中</option><option value="failed">失败</option><option value="cancelled">已取消</option></select></label>
+              <label class="field compact"><span>归档状态</span><select id="history-archive-filter"><option value="active">未归档</option><option value="archived">已归档</option><option value="all">全部任务</option></select></label>
+              <label class="field compact"><span>排序</span><select id="history-sort"><option value="newest">最近创建</option><option value="oldest">最早创建</option><option value="company">公司名称</option><option value="role">岗位名称</option><option value="status">任务状态</option></select></label>
+            </div>
+            <button id="refresh-history-button" type="button" class="secondary-button">刷新任务历史</button>
+            <p id="history-message" class="review-help" role="status">正在载入历史任务…</p>
+            <div id="history-list" class="history-list"></div>
+            <details id="history-comparison-panel">
+              <summary>对比任意两个已保存版本</summary>
+              <p class="review-help">可选择同一任务或不同任务中的版本。对比已归档任务时，请将归档状态切换为“全部任务”。</p>
+              <div class="comparison-picker">
+                <label class="field compact"><span>原版本任务</span><select id="compare-before-run"></select></label>
+                <label class="field compact"><span>原版本</span><select id="compare-before-version"></select></label>
+                <label class="field compact"><span>新版本任务</span><select id="compare-after-run"></select></label>
+                <label class="field compact"><span>新版本</span><select id="compare-after-version"></select></label>
+              </div>
+              <button id="compare-versions-button" type="button" class="secondary-button">对比所选版本</button>
+              <p id="version-comparison-status" class="review-help" role="status"></p>
+              <div id="version-comparison-result"></div>
+            </details>
+          </section>
+
           <form id="tailor-form" class="tailor-form">
-            <label class="field file-field">
+            <label id="resume-file-field" class="field file-field">
               <span>简历文件</span>
               <input id="resume-file" name="resume_file" type="file" accept=".pdf,.docx,.md,.txt" required />
               <small>建议上传可复制文字的 PDF 或标准 DOCX。</small>
@@ -56,6 +100,11 @@
                 required
               ></textarea>
             </label>
+
+            <div class="inline-fields">
+              <label class="field compact"><span>目标公司（选填）</span><input id="target-company" type="text" maxlength="120" placeholder="便于整理投递材料" /></label>
+              <label class="field compact"><span>岗位名称（选填）</span><input id="target-role" type="text" maxlength="120" placeholder="留空则使用 JD 识别结果" /></label>
+            </div>
 
             <label class="field">
               <span>候选人备注</span>
@@ -86,6 +135,20 @@
                 </select>
               </label>
             </div>
+
+            <aside class="privacy-notice" aria-labelledby="privacy-title">
+              <strong id="privacy-title">隐私与数据说明</strong>
+              <p>
+                简历和 JD 仅用于本次解析、生成、审查、编辑与导出。匿名任务默认保存
+                <span id="privacy-retention-hours">24</span> 小时，之后自动删除；生成后也可立即删除。
+                选择保存基础档案时，已确认资料会长期保留并用于你后续创建的 JD 任务，可随时导出或删除。
+                为方便回访，当前浏览器会保存任务访问凭据至任务到期，材料内容由服务端保存。
+              </p>
+              <label>
+                <input id="privacy-consent" type="checkbox" required />
+                <span>我已了解上述用途和保存期限，并同意处理所上传的求职材料。</span>
+              </label>
+            </aside>
 
             <button id="submit-button" type="submit" class="submit-button">解析简历并确认</button>
           </form>
@@ -166,6 +229,13 @@
               </label>
             </div>
 
+            <section class="archive-save-panel">
+              <label class="field compact"><span>档案名称</span><input id="archive-label" type="text" maxlength="80" value="基础档案" /></label>
+              <label class="fact-confirm"><input id="archive-storage-consent" type="checkbox" /><span>同意将已确认资料保存为可复用档案，保留至我主动删除。</span></label>
+              <button id="save-archive-button" type="button" class="secondary-button" disabled>保存基础档案</button>
+              <p id="archive-save-status" class="review-help" role="status">核对并确认资料后，可以单独保存档案。</p>
+            </section>
+
             <div class="confirmation-actions">
               <button id="back-to-upload-button" type="button" class="secondary-button">返回修改材料</button>
               <button id="confirm-generate-button" type="button" class="submit-button" disabled>确认并生成定制简历</button>
@@ -184,6 +254,19 @@
             <div class="progress-rail">
               <div id="progress-fill" class="progress-fill"></div>
             </div>
+
+            <div class="job-control-row">
+              <p id="job-attempt-status" class="review-help">等待任务开始。</p>
+              <div class="job-control-actions">
+                <button id="cancel-run-button" type="button" class="secondary-button">取消任务</button>
+                <button id="retry-run-button" type="button" class="submit-button hidden">从失败阶段重试</button>
+              </div>
+            </div>
+
+            <details class="stage-history-panel">
+              <summary>查看阶段执行记录</summary>
+              <div id="stage-history-list" class="stage-history-list"></div>
+            </details>
 
             <div class="progress-steps" id="progress-steps">
               <span class="progress-step active">分析 JD</span>
@@ -306,6 +389,7 @@
                 <div class="editor-heading">
                   <div>
                     <h3>定制简历编辑器</h3>
+                    <p id="editor-job-context" class="review-help"></p>
                     <p id="editor-save-status" class="review-help">生成结果已保存。</p>
                   </div>
                   <div class="editor-actions">
@@ -319,6 +403,7 @@
                   当前版本已完成真实性审查。
                 </div>
 
+                <details class="current-task-jd"><summary>查看当前任务的原始 JD</summary><pre id="current-task-jd" class="history-jd"></pre></details>
                 <div class="version-row">
                   <label class="field compact">
                     <span>历史版本</span>
@@ -326,6 +411,14 @@
                   </label>
                   <button id="restore-version-button" type="button" class="secondary-button">恢复此版本</button>
                 </div>
+                <label class="field compact"><span>版本名称</span><input id="version-label" type="text" maxlength="80" placeholder="例如：投递版、精简版" /></label>
+                <div class="version-manager-actions">
+                  <button id="rename-version-button" type="button" class="secondary-button">重命名所选版本</button>
+                  <button id="copy-version-button" type="button" class="secondary-button">复制所选版本</button>
+                  <button id="archive-version-button" type="button" class="secondary-button">归档所选版本</button>
+                  <button id="delete-version-button" type="button" class="danger-button">删除所选版本</button>
+                </div>
+                <p id="version-management-status" class="review-help" role="status">当前使用的版本需要先切换，才能归档或删除。</p>
 
                 <label class="field rewrite-instruction-field">
                   <span>局部重写要求</span>
@@ -370,6 +463,14 @@
               </div>
             </section>
 
+            <section class="subpanel data-control-panel">
+              <div>
+                <h3>任务数据管理</h3>
+                <p id="task-retention" class="review-help">匿名任务会在保存期限届满后自动删除。</p>
+              </div>
+              <button id="delete-run-button" type="button" class="danger-button">立即删除本次任务</button>
+            </section>
+
             <div class="result-columns">
               <section class="subpanel">
                 <h3>JD 复习文档</h3>
@@ -387,5 +488,6 @@
     </div>
 
     <script src="/app/app.js"></script>
+    <script src="/app/history.js"></script>
   </body>
   </html>

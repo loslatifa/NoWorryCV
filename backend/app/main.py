@@ -1,12 +1,34 @@
 from pathlib import Path
+import logging
+from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from backend.app.api.v1.routes import router as api_router
+from backend.app.api.v1.profiles import router as profiles_router
+from backend.app.api.v1.history import router as history_router
+from backend.app.api.v1.applications import router as applications_router
 from backend.app.core.config import get_settings
+from backend.app.services.rate_limit import SlidingWindowRateLimiter
+from backend.app.services.runs.store import get_run_store
+from backend.app.services.runs.queue import get_task_queue
+from backend.app.services.runs.worker import start_task_workers
+from backend.app.services.applications import get_application_store
+
+
+logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def app_lifespan(_app: FastAPI):
+    start_task_workers()
+    try:
+        yield
+    finally:
+        get_task_queue().stop()
 
 
 def create_app() -> FastAPI:
@@ -16,15 +38,56 @@ def create_app() -> FastAPI:
         title=settings.app_name,
         version=settings.app_version,
         description="Python-first MVP for JD-tailored resumes.",
+        lifespan=app_lifespan,
     )
 
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=True,
+        allow_origins=[item.strip() for item in settings.cors_allowed_origins.split(",") if item.strip()],
+        allow_credentials=False,
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    rate_limiter = SlidingWindowRateLimiter(
+        settings.rate_limit_requests,
+        settings.rate_limit_window_seconds,
+    )
+    limited_paths = {
+        "{0}/resume/parse-upload".format(settings.api_prefix),
+        "{0}/tailor-runs/upload".format(settings.api_prefix),
+        "{0}/tailor-runs/upload-jobs".format(settings.api_prefix),
+        "{0}/tailor-runs/confirmed-jobs".format(settings.api_prefix),
+    }
+
+    @app.middleware("http")
+    async def limit_expensive_requests(request: Request, call_next):
+        get_run_store().cleanup_expired()
+        get_task_queue().cleanup_expired()
+        get_application_store().cleanup_expired()
+        profile_prefix = "{0}/candidate-profiles".format(settings.api_prefix)
+        if request.method == "POST" and (
+            request.url.path in limited_paths
+            or request.url.path == profile_prefix
+            or (request.url.path.startswith(profile_prefix + "/")
+                and request.url.path.endswith(("/preview", "/jobs", "/applications")))
+        ):
+            client_host = request.client.host if request.client else "unknown"
+            allowed, retry_after = rate_limiter.check(client_host)
+            if not allowed:
+                return JSONResponse(
+                    status_code=429,
+                    content={"detail": "请求过于频繁，请稍后再试。"},
+                    headers={"Retry-After": str(retry_after)},
+                )
+        return await call_next(request)
+
+    @app.exception_handler(Exception)
+    async def handle_unexpected_error(request: Request, exc: Exception) -> JSONResponse:
+        logger.exception("Unhandled API error for %s", request.url.path, exc_info=exc)
+        return JSONResponse(status_code=500, content={"detail": "服务暂时不可用，请稍后重试。"})
+
+    get_run_store().cleanup_expired()
 
     @app.get("/health", tags=["health"])
     def healthcheck() -> dict:
@@ -36,6 +99,9 @@ def create_app() -> FastAPI:
 
     app.mount("/app", StaticFiles(directory=static_dir, html=True), name="app")
     app.include_router(api_router, prefix=settings.api_prefix)
+    app.include_router(profiles_router, prefix=settings.api_prefix)
+    app.include_router(history_router, prefix=settings.api_prefix)
+    app.include_router(applications_router, prefix=settings.api_prefix)
     return app
 
 

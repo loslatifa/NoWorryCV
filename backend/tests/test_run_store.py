@@ -17,7 +17,10 @@ def test_run_status_persists_across_store_cache_reset() -> None:
 
     app_reloaded = create_app()
     client_reloaded = TestClient(app_reloaded)
-    response = client_reloaded.get("/api/v1/tailor-runs/{0}/status".format(job.run_id))
+    response = client_reloaded.get(
+        "/api/v1/tailor-runs/{0}/status".format(job.run_id),
+        headers={"X-Run-Token": job.access_token},
+    )
 
     assert response.status_code == 200
     payload = response.json()

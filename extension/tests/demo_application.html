@@ -1,0 +1,22 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>投递助手本地验收页</title>
+<style>body{max-width:720px;margin:30px auto;font:16px sans-serif;color:#234}label{display:block;margin:14px 0}input,textarea,select{display:block;padding:8px;min-width:320px}fieldset{margin:20px 0}button{padding:10px;margin:8px}</style>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"JobPosting","title":"数据开发实习生","hiringOrganization":{"name":"示例科技"},"description":"<p>岗位职责：使用 SQL 开发数据看板，分析增长实验数据，维护报表服务。</p><p>任职要求：熟悉 SQL、Python 和数据分析，具备项目开发经验。</p>"}</script></head><body>
+<h1>数据开发实习生</h1><article class="job-description">岗位职责：使用 SQL 开发数据看板，分析增长实验数据，维护报表服务。任职要求：熟悉 SQL、Python 和数据分析，具备项目开发经验。</article>
+<form onsubmit="event.preventDefault();document.getElementById('submitted').textContent='用户已手动提交';">
+<label for="full-name">姓名</label><input id="full-name" name="full_name" required>
+<label for="email">邮箱</label><input id="email" type="email" required>
+<label for="phone">电话</label><input id="phone" type="tel">
+<label for="intro">自我介绍</label><textarea id="intro"></textarea>
+<div id="projects"><fieldset data-repeatable-section="projects"><legend>项目经历</legend>
+<label>项目名称<input data-repeatable-type="projects" data-repeatable-index="0" data-field-role="name"></label>
+<label>项目角色<input data-repeatable-type="projects" data-repeatable-index="0" data-field-role="role"></label>
+<label>项目描述<textarea data-repeatable-type="projects" data-repeatable-index="0" data-field-role="description"></textarea></label>
+</fieldset></div>
+<button id="add-project" type="button" data-add-section="projects" onclick="addProject()">新增项目</button>
+<label for="salary">期望薪资</label><input id="salary">
+<label for="resume">上传简历 PDF/DOCX</label><input id="resume" type="file" accept=".pdf,.docx">
+<p id="attached"></p><button type="submit">提交申请</button><p id="submitted">尚未提交</p></form>
+<script>
+function addProject(){const host=document.getElementById('projects');const index=host.children.length;const copy=host.firstElementChild.cloneNode(true);copy.querySelectorAll('input,textarea').forEach(el=>{el.value='';el.dataset.repeatableIndex=String(index)});host.append(copy)}
+document.getElementById('resume').addEventListener('change',event=>{document.getElementById('attached').textContent=event.target.files[0]?.name||''});
+</script></body></html>

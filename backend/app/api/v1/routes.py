@@ -1,7 +1,12 @@
-from threading import Thread
+import logging
+import json
+import hashlib
+import time
+from pathlib import Path
+from typing import Optional
 from urllib.parse import quote
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, Header, HTTPException, UploadFile
 from fastapi.responses import Response
 
 from backend.app.agents.orchestrator import ResumeTailorOrchestrator
@@ -9,6 +14,7 @@ from backend.app.agents.ats import ATSScoringAgent
 from backend.app.agents.compliance import TruthfulnessComplianceAgent
 from backend.app.agents.partial_rewrite import PartialRewriteAgent
 from backend.app.graph.resume_tailor_graph import analyze_jd_payload, parse_resume_payload, run_tailor_pipeline
+from backend.app.core.config import get_settings
 from backend.app.schemas.candidate import CandidateProfile
 from backend.app.schemas.diff import DraftDiffRequest, DraftDiffResponse
 from backend.app.schemas.export import ResumeExportRequest
@@ -33,6 +39,8 @@ from backend.app.services.draft_diff import build_draft_diff
 from backend.app.services.llm.structured import StructuredLLMError
 from backend.app.services.parsers.file_parser import extract_text_from_file
 from backend.app.services.runs.store import get_run_store
+from backend.app.services.runs.queue import get_task_queue
+from backend.app.services.runs.worker import start_task_workers
 from backend.app.services.resume_export import (
     DOCX_MEDIA_TYPE,
     PDF_MEDIA_TYPE,
@@ -43,6 +51,8 @@ from backend.app.services.resume_export import (
 )
 
 router = APIRouter(tags=["tailor"])
+logger = logging.getLogger(__name__)
+SUPPORTED_RESUME_SUFFIXES = {".pdf", ".docx", ".md", ".txt"}
 
 
 @router.post("/resume/parse", response_model=CandidateProfile)
@@ -137,6 +147,7 @@ async def create_tailor_run_job_from_upload(
     candidate_notes: str = Form(""),
     output_language: str = Form("auto"),
     max_iterations: int = Form(2),
+    idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
 ) -> TailorRunJobStatus:
     resume_text = await _extract_uploaded_resume(resume_file)
     if not jd_text.strip():
@@ -149,11 +160,14 @@ async def create_tailor_run_job_from_upload(
         output_language=output_language,
         max_iterations=max_iterations,
     )
-    return _start_tailor_job(payload)
+    return _start_tailor_job(payload, idempotency_key)
 
 
 @router.post("/tailor-runs/confirmed-jobs", response_model=TailorRunJobStatus)
-def create_confirmed_tailor_run_job(payload: TailorRunInput) -> TailorRunJobStatus:
+def create_confirmed_tailor_run_job(
+    payload: TailorRunInput,
+    idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
+) -> TailorRunJobStatus:
     if not payload.resume_text.strip():
         raise HTTPException(status_code=400, detail="Resume text cannot be empty.")
     if not payload.jd_text.strip():
@@ -169,47 +183,64 @@ def create_confirmed_tailor_run_job(payload: TailorRunInput) -> TailorRunJobStat
     fact_ids = [card.id for card in payload.confirmed_fact_cards]
     if len(fact_ids) != len(set(fact_ids)):
         raise HTTPException(status_code=400, detail="Confirmed fact IDs must be unique.")
-    return _start_tailor_job(payload)
+    return _start_tailor_job(payload, idempotency_key)
 
 
-def _start_tailor_job(payload: TailorRunInput) -> TailorRunJobStatus:
+def _start_tailor_job(
+    payload: TailorRunInput,
+    idempotency_key: Optional[str] = None,
+    candidate_archive_id: str = "",
+    candidate_archive_revision: int = 0,
+) -> TailorRunJobStatus:
     store = get_run_store()
     job = store.create("任务已创建，等待开始。")
-
-    def progress_callback(stage: str, percent: int, message: str, review_cards=None) -> None:
-        store.mark_running(
-            job.run_id,
-            stage=stage,
-            percent=percent,
-            message=message,
-            review_cards=review_cards,
-        )
-
-    def runner() -> None:
-        try:
-            orchestrator = ResumeTailorOrchestrator(progress_callback=progress_callback)
-            result = orchestrator.run(payload, run_id=job.run_id)
-            store.mark_completed(job.run_id, result=result, message="简历定制完成。")
-        except Exception as exc:  # pragma: no cover - defensive path for runtime errors
-            store.mark_failed(job.run_id, str(exc))
-
-    Thread(target=runner, daemon=True).start()
-    running_job = store.mark_running(job.run_id, stage="queued", percent=5, message="任务已排队，准备优先分析 JD。")
-    return running_job or job
+    normalized_key = (idempotency_key or "").strip()
+    if not normalized_key:
+        payload_fingerprint = hashlib.sha256(payload.model_dump_json().encode("utf-8")).hexdigest()
+        normalized_key = "auto:{0}:{1}".format(payload_fingerprint, int(time.time() // 60))
+    queued_job = store.update(
+        job.run_id,
+        status="queued",
+        current_stage="queued",
+        progress_percent=5,
+        status_message="任务已进入持久化队列，准备优先分析 JD。",
+        max_attempts=get_settings().task_max_attempts,
+        candidate_archive_id=candidate_archive_id,
+        candidate_archive_revision=candidate_archive_revision,
+        target_job_title=payload.target_role.strip() or (payload.preanalyzed_jd_profile.job_title if payload.preanalyzed_jd_profile else ""),
+        target_company=payload.target_company.strip(),
+        jd_text=payload.jd_text,
+    )
+    duplicate_run_id = get_task_queue().enqueue(
+        job.run_id,
+        payload,
+        normalized_key,
+        job.expires_at,
+    )
+    if duplicate_run_id:
+        store.delete_authorized(job.run_id, job.access_token or "")
+        raise HTTPException(status_code=409, detail="相同任务已提交，请继续查看原任务。")
+    start_task_workers()
+    response = queued_job or job
+    return response.model_copy(update={"access_token": job.access_token}, deep=True)
 
 
 @router.get("/tailor-runs/{run_id}/draft-versions", response_model=list[DraftVersion])
-def get_draft_versions(run_id: str) -> list[DraftVersion]:
-    job = get_run_store().get(run_id)
-    if job is None or job.result is None:
+def get_draft_versions(run_id: str, x_run_token: Optional[str] = Header(None)) -> list[DraftVersion]:
+    job = _get_authorized_run(run_id, x_run_token)
+    if job.result is None:
         raise HTTPException(status_code=404, detail="Completed run not found.")
     return job.result.draft_versions
 
 
 @router.post("/tailor-runs/{run_id}/draft-diff", response_model=DraftDiffResponse)
-def get_draft_diff(run_id: str, payload: DraftDiffRequest) -> DraftDiffResponse:
-    job = get_run_store().get(run_id)
-    if job is None or job.result is None:
+def get_draft_diff(
+    run_id: str,
+    payload: DraftDiffRequest,
+    x_run_token: Optional[str] = Header(None),
+) -> DraftDiffResponse:
+    job = _get_authorized_run(run_id, x_run_token)
+    if job.result is None:
         raise HTTPException(status_code=404, detail="Completed run not found.")
     return build_draft_diff(
         job.result.candidate_profile,
@@ -219,9 +250,13 @@ def get_draft_diff(run_id: str, payload: DraftDiffRequest) -> DraftDiffResponse:
 
 
 @router.post("/tailor-runs/{run_id}/score", response_model=JDMatchScoreResponse)
-def score_resume_draft(run_id: str, payload: JDMatchScoreRequest) -> JDMatchScoreResponse:
-    job = get_run_store().get(run_id)
-    if job is None or job.result is None:
+def score_resume_draft(
+    run_id: str,
+    payload: JDMatchScoreRequest,
+    x_run_token: Optional[str] = Header(None),
+) -> JDMatchScoreResponse:
+    job = _get_authorized_run(run_id, x_run_token)
+    if job.result is None:
         raise HTTPException(status_code=404, detail="Completed run not found.")
     draft = normalize_manual_draft(
         job.result.final_package.draft,
@@ -250,9 +285,13 @@ def score_resume_draft(run_id: str, payload: JDMatchScoreRequest) -> JDMatchScor
 
 
 @router.post("/tailor-runs/{run_id}/export-preview")
-def preview_resume_export(run_id: str, payload: ResumeExportRequest) -> Response:
-    job = get_run_store().get(run_id)
-    if job is None or job.result is None:
+def preview_resume_export(
+    run_id: str,
+    payload: ResumeExportRequest,
+    x_run_token: Optional[str] = Header(None),
+) -> Response:
+    job = _get_authorized_run(run_id, x_run_token)
+    if job.result is None:
         raise HTTPException(status_code=404, detail="Completed run not found.")
     pdf_bytes = build_pdf(payload.draft, job.result.candidate_profile)
     page_count = pdf_page_count(pdf_bytes)
@@ -269,9 +308,14 @@ def preview_resume_export(run_id: str, payload: ResumeExportRequest) -> Response
 
 
 @router.post("/tailor-runs/{run_id}/export/{export_format}")
-def export_resume(run_id: str, export_format: str, payload: ResumeExportRequest) -> Response:
-    job = get_run_store().get(run_id)
-    if job is None or job.result is None:
+def export_resume(
+    run_id: str,
+    export_format: str,
+    payload: ResumeExportRequest,
+    x_run_token: Optional[str] = Header(None),
+) -> Response:
+    job = _get_authorized_run(run_id, x_run_token)
+    if job.result is None:
         raise HTTPException(status_code=404, detail="Completed run not found.")
     normalized_format = export_format.lower()
     if normalized_format == "docx":
@@ -301,10 +345,14 @@ def export_resume(run_id: str, export_format: str, payload: ResumeExportRequest)
 
 
 @router.put("/tailor-runs/{run_id}/draft", response_model=DraftMutationResponse)
-def save_manual_draft(run_id: str, payload: DraftSaveRequest) -> DraftMutationResponse:
+def save_manual_draft(
+    run_id: str,
+    payload: DraftSaveRequest,
+    x_run_token: Optional[str] = Header(None),
+) -> DraftMutationResponse:
     store = get_run_store()
-    job = store.get(run_id)
-    if job is None or job.result is None:
+    job = _get_authorized_run(run_id, x_run_token)
+    if job.result is None:
         raise HTTPException(status_code=404, detail="Completed run not found.")
     draft = normalize_manual_draft(job.result.final_package.draft, payload.draft)
     compliance_report = TruthfulnessComplianceAgent().run(draft, job.result.fact_cards)
@@ -335,12 +383,16 @@ def save_manual_draft(run_id: str, payload: DraftSaveRequest) -> DraftMutationRe
 
 
 @router.post("/tailor-runs/{run_id}/rewrite-part", response_model=DraftMutationResponse)
-def rewrite_draft_part(run_id: str, payload: PartialRewriteRequest) -> DraftMutationResponse:
+def rewrite_draft_part(
+    run_id: str,
+    payload: PartialRewriteRequest,
+    x_run_token: Optional[str] = Header(None),
+) -> DraftMutationResponse:
     if payload.target_type not in VALID_PARTIAL_TARGETS:
         raise HTTPException(status_code=400, detail="Unsupported partial rewrite target.")
     store = get_run_store()
-    job = store.get(run_id)
-    if job is None or job.result is None:
+    job = _get_authorized_run(run_id, x_run_token)
+    if job.result is None:
         raise HTTPException(status_code=404, detail="Completed run not found.")
     try:
         output = PartialRewriteAgent().run(
@@ -371,24 +423,86 @@ def rewrite_draft_part(run_id: str, payload: PartialRewriteRequest) -> DraftMuta
 
 
 async def _extract_uploaded_resume(resume_file: UploadFile) -> str:
+    settings = get_settings()
+    max_upload_bytes = max(1, settings.max_upload_bytes)
+    filename = resume_file.filename or ""
+    if Path(filename).suffix.lower() not in SUPPORTED_RESUME_SUFFIXES:
+        raise HTTPException(status_code=400, detail="仅支持 PDF、DOCX、Markdown 和 TXT 简历。")
     try:
-        content = await resume_file.read()
-        resume_text = extract_text_from_file(resume_file.filename or "resume.txt", content)
+        content = await resume_file.read(max_upload_bytes + 1)
+        if len(content) > max_upload_bytes:
+            raise HTTPException(
+                status_code=413,
+                detail="简历文件不能超过 {0} MB。".format(
+                    max(1, (max_upload_bytes + 1024 * 1024 - 1) // (1024 * 1024))
+                ),
+            )
+        resume_text = extract_text_from_file(filename, content)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RuntimeError as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        logger.warning("Resume file parsing failed for %s: %s", filename, exc)
+        raise HTTPException(status_code=400, detail="无法读取该简历文件，请检查文件是否损坏或改用其他格式。") from exc
     if not resume_text.strip():
         raise HTTPException(status_code=400, detail="Uploaded resume file did not yield readable text.")
     return resume_text
 
 
 @router.get("/tailor-runs/{run_id}/status", response_model=TailorRunJobStatus)
-def get_tailor_run_status(run_id: str) -> TailorRunJobStatus:
-    job = get_run_store().get(run_id)
+def get_tailor_run_status(
+    run_id: str,
+    x_run_token: Optional[str] = Header(None),
+) -> TailorRunJobStatus:
+    return _enrich_queue_metadata(_get_authorized_run(run_id, x_run_token))
+
+
+@router.post("/tailor-runs/{run_id}/cancel", response_model=TailorRunJobStatus)
+def cancel_tailor_run(
+    run_id: str,
+    x_run_token: Optional[str] = Header(None),
+) -> TailorRunJobStatus:
+    _get_authorized_run(run_id, x_run_token)
+    if not get_task_queue().request_cancel(run_id):
+        raise HTTPException(status_code=409, detail="当前任务状态无法取消。")
+    job = get_run_store().mark_cancelled(run_id)
     if job is None:
-        raise HTTPException(status_code=404, detail="Run not found.")
-    return job
+        raise HTTPException(status_code=404, detail="Run not found or access denied.")
+    return _enrich_queue_metadata(job)
+
+
+@router.post("/tailor-runs/{run_id}/retry", response_model=TailorRunJobStatus)
+def retry_tailor_run(
+    run_id: str,
+    x_run_token: Optional[str] = Header(None),
+) -> TailorRunJobStatus:
+    _get_authorized_run(run_id, x_run_token)
+    if not get_task_queue().retry(run_id):
+        raise HTTPException(status_code=409, detail="当前任务不可重试或已达到最大尝试次数。")
+    job = get_run_store().mark_queued_for_recovery(run_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Run not found or access denied.")
+    return _enrich_queue_metadata(job)
+
+
+@router.delete("/tailor-runs/{run_id}", status_code=204)
+def delete_tailor_run(run_id: str, x_run_token: Optional[str] = Header(None)) -> Response:
+    _get_authorized_run(run_id, x_run_token)
+    get_task_queue().delete(run_id)
+    if not get_run_store().delete_authorized(run_id, x_run_token or ""):
+        raise HTTPException(status_code=404, detail="Run not found or access denied.")
+    return Response(status_code=204)
+
+
+@router.get("/privacy")
+def get_privacy_summary() -> dict:
+    settings = get_settings()
+    return {
+        "anonymous_retention_hours": settings.anonymous_run_ttl_hours,
+        "max_upload_bytes": settings.max_upload_bytes,
+        "supported_file_types": sorted(SUPPORTED_RESUME_SUFFIXES),
+        "saved_profile_retention": "用户明确同意保存的基础档案保留至主动删除；历史任务仍按匿名任务期限清理。",
+        "usage": "简历与 JD 仅用于解析、生成、审查、编辑和导出本次求职材料。",
+    }
 
 
 def _build_upload_payload(
@@ -409,7 +523,36 @@ def _build_upload_payload(
 
 
 def _llm_required_error(exc: Exception) -> HTTPException:
+    logger.warning("LLM request failed: %s", exc)
     return HTTPException(
         status_code=503,
-        detail="当前已关闭启发式 fallback，系统需要可用的大模型链路才能运行。原始错误：{0}".format(str(exc)),
+        detail="模型服务暂时不可用，请检查服务配置或稍后重试。",
+    )
+
+
+def _get_authorized_run(run_id: str, access_token: Optional[str]) -> TailorRunJobStatus:
+    job = get_run_store().get_authorized(run_id, access_token or "")
+    if job is None:
+        raise HTTPException(status_code=404, detail="Run not found or access denied.")
+    return job
+
+
+def _enrich_queue_metadata(job: TailorRunJobStatus) -> TailorRunJobStatus:
+    metadata = get_task_queue().metadata(job.run_id)
+    if metadata is None:
+        return job
+    attempt_count = int(metadata.get("attempt") or 0)
+    max_attempts = int(metadata.get("max_attempts") or job.max_attempts)
+    queue_status = str(metadata.get("status") or job.status)
+    return job.model_copy(
+        update={
+            "jd_text": job.jd_text or json.loads(metadata["payload_json"]).get("jd_text", ""),
+            "attempt_count": attempt_count,
+            "max_attempts": max_attempts,
+            "retryable": queue_status in {"failed", "cancelled"} and attempt_count < max_attempts,
+            "failed_stage": str(metadata.get("current_stage") or job.failed_stage) if queue_status == "failed" else job.failed_stage,
+            "error_type": str(metadata.get("error_type") or job.error_type),
+            "stage_history": get_task_queue().stage_history(job.run_id),
+        },
+        deep=True,
     )

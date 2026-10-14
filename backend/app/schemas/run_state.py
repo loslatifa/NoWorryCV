@@ -30,6 +30,8 @@ class TailorRunInput(BaseModel):
     confirmed_candidate_profile: Optional[CandidateProfile] = None
     confirmed_fact_cards: List[FactCard] = Field(default_factory=list)
     preanalyzed_jd_profile: Optional[JDProfile] = None
+    target_company: str = Field(default="", max_length=120)
+    target_role: str = Field(default="", max_length=120)
 
     @field_validator("max_iterations")
     @classmethod
@@ -44,7 +46,7 @@ class TailorRunInput(BaseModel):
     @classmethod
     def validate_processing_mode(cls, value: str) -> str:
         normalized = (value or "full").strip().lower()
-        if normalized not in {"full", "fast"}:
+        if normalized not in {"full", "fast", "application"}:
             return "full"
         return normalized
 
@@ -73,6 +75,7 @@ class DraftVersion(BaseModel):
     created_at: str
     source: str = "manual"
     label: str = "已保存版本"
+    archived: bool = False
     draft: ResumeDraft
     compliance_report: ComplianceReport
     ats_report: ATSReport
@@ -92,15 +95,41 @@ class TailorRunResult(BaseModel):
     reviews: List[ReviewBundle]
     final_package: FinalResumePackage
     draft_versions: List[DraftVersion] = Field(default_factory=list)
+    active_version_id: str = ""
+
+
+class StageExecutionRecord(BaseModel):
+    stage: str
+    status: str
+    attempt: int = 1
+    started_at: str = ""
+    finished_at: str = ""
+    duration_ms: int = 0
+    error_type: str = ""
 
 
 class TailorRunJobStatus(BaseModel):
     run_id: str
+    candidate_archive_id: str = ""
+    candidate_archive_revision: int = 0
+    target_job_title: str = ""
+    target_company: str = ""
+    jd_text: str = ""
+    archived: bool = False
+    access_token: Optional[str] = None
+    created_at: str = ""
+    expires_at: str = ""
     status: str = "queued"
     progress_percent: int = 0
     current_stage: str = ""
     status_message: str = ""
     error_message: str = ""
+    error_type: str = ""
+    failed_stage: str = ""
+    attempt_count: int = 0
+    max_attempts: int = 3
+    retryable: bool = False
+    stage_history: List[StageExecutionRecord] = Field(default_factory=list)
     review_cards: List[KnowledgeReviewCard] = Field(default_factory=list)
     result: Optional[TailorRunResult] = None
 

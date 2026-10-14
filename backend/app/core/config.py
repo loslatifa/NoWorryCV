@@ -20,6 +20,16 @@ class Settings(BaseSettings):
     llm_response_format: str = "json_schema"
     llm_strict_mode: bool = True
     run_store_path: str = str(Path(".dist") / "run_store.json")
+    task_queue_path: str = str(Path(".dist") / "task_queue.sqlite3")
+    candidate_archive_path: str = str(Path(".dist") / "candidate_archives.sqlite3")
+    application_store_path: str = str(Path(".dist") / "applications.sqlite3")
+    task_worker_count: int = 1
+    task_max_attempts: int = 3
+    anonymous_run_ttl_hours: int = 24
+    max_upload_bytes: int = 5 * 1024 * 1024
+    rate_limit_requests: int = 20
+    rate_limit_window_seconds: int = 60
+    cors_allowed_origins: str = "http://127.0.0.1:8000,http://localhost:8000"
     qwen_api_key: str = Field(
         default="",
         validation_alias=AliasChoices("QWEN_API_KEY", "DASHSCOPE_API_KEY"),

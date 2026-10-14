@@ -76,9 +76,11 @@ def test_export_api_supports_preview_docx_pdf_and_chinese_filename() -> None:
     client = TestClient(create_app())
     draft = completed.result.final_package.draft.model_dump(mode="json")
     request = {"draft": draft, "filename": "张三/产品经理.pdf"}
+    headers = {"X-Run-Token": completed.access_token}
 
     preview = client.post(
         "/api/v1/tailor-runs/{0}/export-preview".format(completed.run_id),
+        headers=headers,
         json=request,
     )
     assert preview.status_code == 200
@@ -89,6 +91,7 @@ def test_export_api_supports_preview_docx_pdf_and_chinese_filename() -> None:
 
     docx = client.post(
         "/api/v1/tailor-runs/{0}/export/docx".format(completed.run_id),
+        headers=headers,
         json=request,
     )
     assert docx.status_code == 200
@@ -100,6 +103,7 @@ def test_export_api_supports_preview_docx_pdf_and_chinese_filename() -> None:
 
     pdf = client.post(
         "/api/v1/tailor-runs/{0}/export/pdf".format(completed.run_id),
+        headers=headers,
         json=request,
     )
     assert pdf.status_code == 200
@@ -123,6 +127,7 @@ def test_export_preview_reports_multi_page_overflow() -> None:
 
     response = client.post(
         "/api/v1/tailor-runs/{0}/export-preview".format(completed.run_id),
+        headers={"X-Run-Token": completed.access_token},
         json={"draft": draft.model_dump(mode="json"), "filename": "多页简历"},
     )
 
@@ -138,6 +143,7 @@ def test_export_filename_sanitization_and_invalid_format() -> None:
     completed = _completed_run()
     response = TestClient(create_app()).post(
         "/api/v1/tailor-runs/{0}/export/txt".format(completed.run_id),
+        headers={"X-Run-Token": completed.access_token},
         json={
             "draft": completed.result.final_package.draft.model_dump(mode="json"),
             "filename": "resume",

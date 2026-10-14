@@ -88,6 +88,7 @@ def test_completed_run_exposes_draft_diff_api() -> None:
 
     response = client.post(
         "/api/v1/tailor-runs/{0}/draft-diff".format(completed.run_id),
+        headers={"X-Run-Token": completed.access_token},
         json={"draft": completed.result.final_package.draft.model_dump(mode="json")},
     )
 
