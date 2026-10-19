@@ -19,6 +19,7 @@ from backend.app.api.v1.materials import router as materials_router
 from backend.app.services.materials import get_material_store
 from backend.app.api.v1.materials import router as materials_router
 from backend.app.services.materials import get_material_store
+from backend.app.api.v1.positions import router as positions_router
 from backend.app.core.config import get_settings
 from backend.app.services.rate_limit import SlidingWindowRateLimiter
 from backend.app.services.runs.store import get_run_store
@@ -121,6 +122,7 @@ def create_app() -> FastAPI:
     app.include_router(interviews_router, prefix=settings.api_prefix)
     app.include_router(materials_router, prefix=settings.api_prefix)
     app.include_router(materials_router, prefix=settings.api_prefix)
+    app.include_router(positions_router, prefix=settings.api_prefix)
     return app
 
 

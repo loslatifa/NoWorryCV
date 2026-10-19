@@ -9,6 +9,7 @@ from backend.app.services.runs.queue import reset_task_queue_cache
 from backend.app.services.profiles import reset_candidate_archive_store_cache
 from backend.app.services.applications import get_application_store
 from backend.app.services.quality import get_quality_store
+from backend.app.services.positions import get_position_store
 from backend.app.services.materials import get_material_store
 from backend.app.services.materials import get_material_store
 from backend.app.services.interviews import get_interview_store
@@ -23,6 +24,7 @@ def reset_runtime_caches(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("CANDIDATE_ARCHIVE_PATH", str(tmp_path / "candidate_archives.sqlite3"))
     monkeypatch.setenv("APPLICATION_STORE_PATH", str(tmp_path / "applications.sqlite3"))
     monkeypatch.setenv("QUALITY_STORE_PATH", str(tmp_path / "quality.sqlite3"))
+    monkeypatch.setenv("POSITION_STORE_PATH", str(tmp_path / "positions.sqlite3"))
     monkeypatch.setenv("MATERIAL_STORE_PATH", str(tmp_path / "materials.sqlite3"))
     monkeypatch.setenv("MATERIAL_STORE_PATH", str(tmp_path / "materials.sqlite3"))
     monkeypatch.setenv("INTERVIEW_STORE_PATH", str(tmp_path / "interviews.sqlite3"))
@@ -31,6 +33,7 @@ def reset_runtime_caches(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("LLM_API_KEY", "")
     monkeypatch.setenv("DEEPSEEK_API_KEY", "")
     get_quality_store.cache_clear()
+    get_position_store.cache_clear()
     get_material_store.cache_clear()
     get_material_store.cache_clear()
     get_interview_store.cache_clear()
@@ -44,6 +47,7 @@ def reset_runtime_caches(monkeypatch, tmp_path) -> None:
     get_application_store.cache_clear()
     yield
     get_quality_store.cache_clear()
+    get_position_store.cache_clear()
     get_material_store.cache_clear()
     get_material_store.cache_clear()
     get_interview_store.cache_clear()

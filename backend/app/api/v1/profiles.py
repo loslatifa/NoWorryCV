@@ -20,6 +20,7 @@ from backend.app.services.profiles import (
 )
 from backend.app.services.runs.store import get_run_store
 from backend.app.services.applications import get_application_store
+from backend.app.services.positions import get_position_store
 
 router = APIRouter(prefix="/candidate-profiles", tags=["candidate-profiles"])
 
@@ -78,6 +79,7 @@ def delete_profile(archive_id: str, x_profile_token: Optional[str] = Header(None
     if not get_candidate_archive_store().delete_authorized(archive_id, x_profile_token or ""):
         raise HTTPException(status_code=404, detail="基础档案不存在或无权访问。")
     get_application_store().delete_for_profile(archive_id)
+    get_position_store().delete_for_profile(archive_id)
     return Response(status_code=204)
 
 

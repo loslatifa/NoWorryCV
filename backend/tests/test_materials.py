@@ -252,6 +252,45 @@ def test_pack_limit_before_model_call_and_generation_rate_limit(monkeypatch):
         assert response.status_code == 429 and response.headers.get("retry-after")
 
 
+def test_position_pack_storage_consent_version_review_and_independent_retention(tmp_path):
+    from backend.tests.test_positions import setup
+    with TestClient(create_app()) as client:
+        board, profile_headers, archive, position = setup(client)
+        path, headers, pack, job = materials(client)
+        endpoint = f'{board}/{position["id"]}'
+        linked = client.post(endpoint + "/resumes", headers=profile_headers, json={
+            "expected_revision":1,"run_id":job.run_id,"run_token":job.access_token,"version_id":pack["version_id"],"storage_consent":True})
+        assert linked.status_code == 200, linked.text
+        position = linked.json()
+        payload = {"expected_revision":position["revision"], "resume_id":position["current_resume_id"],
+            "pack_id":pack["id"],"expected_pack_revision":pack["revision"],"run_token":job.access_token,"storage_consent":True}
+        assert client.post(endpoint+"/materials",headers=profile_headers,json={**payload,"storage_consent":False}).status_code == 422
+        assert client.post(endpoint+"/materials",headers=profile_headers,json=payload).status_code == 409
+        assert client.post(endpoint+"/materials",headers=profile_headers,json={**payload,"run_token":"wrong"}).status_code == 404
+        assert client.post(endpoint+"/materials",json=payload).status_code == 404
+        sources = client.post(endpoint+"/material-sources",headers=profile_headers,json={"runs":[{"id":job.run_id,"token":job.access_token}]}).json()
+        assert sources[0]["pack"]["id"] == pack["id"] and "access_token" not in json.dumps(sources)
+        for item in pack["documents"]:
+            pack = save(client,path,headers,pack,item["id"]).json()
+        assert client.post(endpoint+"/materials",headers=profile_headers,json=payload).status_code == 409  # preview revision changed
+        payload["expected_pack_revision"] = pack["revision"]
+        response = client.post(endpoint+"/materials",headers=profile_headers,json=payload)
+        assert response.status_code == 200, response.text
+        saved = response.json(); snapshot = saved["materials"][0]
+        payload["expected_revision"] = saved["revision"]
+        assert client.post(endpoint+"/materials",headers=profile_headers,json=payload).json() == saved
+        changed = save(client,path,headers,pack,content="后续内容").json()
+        assert changed["documents"][0]["content"] != snapshot["pack"]["documents"][0]["content"]
+        get_run_store().delete_authorized(job.run_id,job.access_token)
+        export = client.get(endpoint+f'/materials/{snapshot["id"]}/export',headers=profile_headers)
+        assert export.status_code == 200
+        with ZipFile(BytesIO(export.content)) as zipped:
+            assert "后续内容" not in zipped.read("cover_letter.md").decode()
+        assert client.get(endpoint+f'/materials/{snapshot["id"]}/export').status_code == 404
+        closed = client.patch(endpoint,headers=profile_headers,json={"expected_revision":saved["revision"],"status":"closed"}).json()
+        assert closed["materials"] == saved["materials"]
+        assert client.delete(endpoint,headers=profile_headers).status_code == 204
+        assert client.get(endpoint+f'/materials/{snapshot["id"]}/export',headers=profile_headers).status_code == 404
 
 
 def test_confirmed_profile_pipeline_supplies_traceable_material_evidence():
@@ -268,3 +307,24 @@ def test_confirmed_profile_pipeline_supplies_traceable_material_evidence():
         assert any(item["text"] == "使用 SQL 分析增长实验" for item in pack["evidence"])
         assert "使用 SQL 分析增长实验" in pack["documents"][0]["content"]
         assert client.get(path,headers={"X-Run-Token":archive["access_token"]}).status_code == 200
+
+
+def test_position_rejects_another_resume_version_and_different_source_jd():
+    from backend.tests.test_positions import setup
+    with TestClient(create_app()) as client:
+        board, profile_headers, _, position = setup(client)
+        path, headers, pack, job = materials(client)
+        endpoint = f'{board}/{position["id"]}'
+        linked = client.post(endpoint+"/resumes",headers=profile_headers,json={"expected_revision":1,"run_id":job.run_id,
+            "run_token":job.access_token,"version_id":pack["version_id"],"storage_consent":True}).json()
+        payload = {"expected_revision":linked["revision"],"resume_id":linked["current_resume_id"],"pack_id":pack["id"],
+            "expected_pack_revision":pack["revision"],"run_token":job.access_token,"storage_consent":True}
+        store = get_run_store(); source = store.get(job.run_id); old = source.result.draft_versions[0]
+        version = store.save_draft_version(job.run_id,old.draft,old.compliance_report,old.ats_report,"manual","另一个版本")
+        another = client.post(path,headers=headers,json={"version_id":version.id}).json()
+        response = client.post(endpoint+"/materials",headers=profile_headers,json={**payload,"pack_id":another["id"],"expected_pack_revision":another["revision"]})
+        assert response.status_code == 409 and "同一个版本" in response.text
+        store.update(job.run_id,jd_text="已经不同的岗位 JD")
+        changed_jd = client.post(path,headers=headers,json={"version_id":pack["version_id"]}).json()
+        response = client.post(endpoint+"/materials",headers=profile_headers,json={**payload,"pack_id":changed_jd["id"],"expected_pack_revision":changed_jd["revision"]})
+        assert response.status_code == 409 and "来源 JD 不同" in response.text
