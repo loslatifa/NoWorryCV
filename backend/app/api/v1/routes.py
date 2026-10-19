@@ -6,13 +6,10 @@ from pathlib import Path
 from typing import Optional
 from urllib.parse import quote
 
-from fastapi import APIRouter, File, Form, Header, HTTPException, UploadFile
-from fastapi.responses import Response
+from fastapi import Request, APIRouter, File, Form, Header, HTTPException, UploadFile
+from fastapi.responses import Response, StreamingResponse
 
 from backend.app.services.preferences import export_preferences, target_pages
-from backend.app.services.provenance import capture_provenance
-from backend.app.services.quality import record_event, saved_version_id
-from backend.app.schemas.preferences import PREFERENCE_OPTIONS, ResumePreferences
 from backend.app.agents.orchestrator import ResumeTailorOrchestrator
 from backend.app.agents.ats import ATSScoringAgent
 from backend.app.agents.compliance import TruthfulnessComplianceAgent
@@ -40,6 +37,9 @@ from backend.app.services.draft_editing import (
     normalize_manual_draft,
 )
 from backend.app.services.draft_diff import build_draft_diff
+from backend.app.services.provenance import capture_provenance
+from backend.app.services.quality import record_event, saved_version_id
+from backend.app.schemas.preferences import PREFERENCE_OPTIONS, ResumePreferences
 from backend.app.services.llm.structured import StructuredLLMError
 from backend.app.services.llm.diagnostics import safe_failure
 from backend.app.services.llm.provider import get_llm_provider
@@ -110,7 +110,6 @@ def preference_options():
     from backend.app.services.template_catalog import public_templates, import_issues
     return {"defaults": ResumePreferences().model_dump(), "options": PREFERENCE_OPTIONS,
             "templates": public_templates(), "template_issues": import_issues()}
-
 
 
 @router.post("/jd/analyze", response_model=JDProfile)
@@ -474,6 +473,19 @@ async def _extract_uploaded_resume(resume_file: UploadFile) -> str:
     if not resume_text.strip():
         raise HTTPException(status_code=400, detail="Uploaded resume file did not yield readable text.")
     return resume_text
+
+
+@router.get("/tailor-runs/{run_id}/events")
+def get_tailor_run_events(request: Request, run_id: str, x_run_token: Optional[str] = Header(None)):
+    from backend.app.services.runs.events import status_events
+    _get_authorized_run(run_id, x_run_token)
+
+    def read_status():
+        job = get_run_store().get_authorized(run_id, x_run_token or "")
+        return _enrich_queue_metadata(job) if job else None
+
+    return StreamingResponse(status_events(request, read_status), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache, no-store", "X-Accel-Buffering": "no"})
 
 
 @router.get("/tailor-runs/{run_id}/status", response_model=TailorRunJobStatus)

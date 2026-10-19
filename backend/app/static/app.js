@@ -182,6 +182,7 @@ const stageDefinitions = [
 ];
 
 let pollTimer = null;
+let progressStreamController = null;
 let tipItems = [];
 let currentTipIndex = 0;
 let reviewCardsSignature = "";
@@ -1878,6 +1879,7 @@ function startWaitingExperience(jdText) {
 }
 
 function stopWaitingExperience(success = false) {
+  progressStreamController?.abort();
   runIsBusy = false;
   syncArchiveControls();
   window.refreshRunHistory?.();
@@ -1945,6 +1947,66 @@ function showNextTip() {
 }
 
 async function pollRunStatus(runId, startedAt = Date.now()) {
+  if (!window.ReadableStream || !window.ProgressStream) return pollRunStatusFallback(runId, startedAt);
+  progressStreamController?.abort();
+  const controller = new AbortController();
+  progressStreamController = controller;
+  let idleTimer;
+  const resetIdle = () => {
+    clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => controller.abort(), 25000);
+  };
+  let reader;
+  try {
+    resetIdle();
+    const response = await fetch(`/api/v1/tailor-runs/${runId}/events`, {
+      headers: runRequestHeaders(false), signal: controller.signal,
+    });
+    if (!response.ok || !response.body || !response.headers.get("content-type")?.includes("text/event-stream")) {
+      throw new Error("进度连接不可用。");
+    }
+    let result = null;
+    let terminalError = null;
+    const parse = ProgressStream.parser(({event, data}) => {
+      if (event !== "status") return;
+      if (runId !== currentRunId) throw new Error("任务已切换或删除。");
+      const job = JSON.parse(data);
+      applyJobStatus(job);
+      if (job.status === "completed") result = job.result;
+      if (["failed", "cancelled"].includes(job.status)) {
+        terminalError = new Error(job.error_message || (job.status === "cancelled" ? "任务已取消。" : "任务执行失败。"));
+        terminalError.recoverable = true;
+      }
+    });
+    reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    while (true) {
+      const {value, done} = await reader.read();
+      if (runId !== currentRunId) throw new Error("任务已切换或删除。");
+      if (done) break;
+      resetIdle();
+      parse(decoder.decode(value, {stream: true}));
+      if (terminalError) throw terminalError;
+      if (result) {
+        cancelRunButton.classList.add("hidden");
+        retryRunButton.classList.add("hidden");
+        return result;
+      }
+      if (Date.now() - startedAt > 5 * 60 * 1000) throw new Error("等待时间过长。");
+    }
+    throw new Error("进度连接已关闭。");
+  } catch (error) {
+    if (error.recoverable || runId !== currentRunId) throw error;
+    return pollRunStatusFallback(runId, startedAt);
+  } finally {
+    clearTimeout(idleTimer);
+    controller.abort();
+    if (reader) { try { await reader.cancel(); } catch (_) {} }
+    if (progressStreamController === controller) progressStreamController = null;
+  }
+}
+
+async function pollRunStatusFallback(runId, startedAt = Date.now()) {
   if (runId !== currentRunId) throw new Error("任务已切换或删除。");
   const response = await fetch(`/api/v1/tailor-runs/${runId}/status`, {
     headers: runRequestHeaders(false),
@@ -1973,7 +2035,7 @@ async function pollRunStatus(runId, startedAt = Date.now()) {
 
   return new Promise((resolve, reject) => {
     pollTimer = window.setTimeout(() => {
-      pollRunStatus(runId, startedAt).then(resolve).catch(reject);
+      pollRunStatusFallback(runId, startedAt).then(resolve).catch(reject);
     }, 900);
   });
 }
