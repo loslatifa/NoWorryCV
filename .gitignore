@@ -18,6 +18,7 @@ noworrycv.egg-info/
 docs/*
 !docs/noworrycv_resume_project_entry.md
 
+!docs/minimal-stack-upgrade-plan.md
 frontend/node_modules/
 backend/app/static/editor/
 .playwright-cli/
@@ -26,4 +27,5 @@ frontend/*.tsbuildinfo
 
 build/
 
-!docs/minimal-stack-upgrade-plan.md
+!docs/usage.md
+!docs/development.md
