@@ -37,6 +37,8 @@ from backend.app.services.draft_editing import (
 )
 from backend.app.services.draft_diff import build_draft_diff
 from backend.app.services.llm.structured import StructuredLLMError
+from backend.app.services.llm.diagnostics import safe_failure
+from backend.app.services.llm.provider import get_llm_provider
 from backend.app.services.parsers.file_parser import extract_text_from_file
 from backend.app.services.runs.store import get_run_store
 from backend.app.services.runs.queue import get_task_queue
@@ -523,10 +525,34 @@ def _build_upload_payload(
 
 
 def _llm_required_error(exc: Exception) -> HTTPException:
-    logger.warning("LLM request failed: %s", exc)
+    diagnostic = safe_failure(exc)
+    code = diagnostic["code"]
+    if code == "generation_failed" and not get_llm_provider().is_available:
+        code = "provider_unavailable"
+    messages = {
+        "provider_unavailable": "未配置可用的模型服务，请检查模型名称和对应密钥，修改配置后重启后端。",
+        "authentication_failed": "模型密钥未通过验证，请检查对应服务商的 API key，修改后重启后端。",
+        "access_denied": "模型服务拒绝访问，请检查账号的模型权限和服务地区。",
+        "quota_exceeded": "模型服务额度或余额不足，请补充额度后重试。",
+        "model_not_found": "配置的模型不存在或未获授权，请核对模型名称和账号权限。",
+        "endpoint_not_found": "模型接口地址或模型名称无效，请检查模型配置。",
+        "timeout": "模型请求超时，请稍后重试；若持续出现，请检查网络和模型服务状态。",
+        "connection_error": "无法连接模型服务，请检查网络或代理设置后重试。",
+        "invalid_output": "模型返回内容不完整或格式不符合要求，请重新解析；若反复出现，请检查模型的 JSON 输出配置。",
+        "output_truncated": "模型返回内容达到长度限制，自动重试后仍未完整生成；请精简重复内容后重试。",
+        "invalid_request": "模型服务不接受当前请求参数，请检查模型和输出格式配置。",
+        "rate_limited": "模型服务限流，请稍后重试。",
+        "provider_error": "模型服务暂时异常，请稍后重试。",
+    }
+    stage = {"resume_parser": "简历解析", "jd_analyst": "岗位分析", "gap_analysis": "缺口分析"}.get(diagnostic["stage"])
+    detail = messages.get(code, "模型服务暂时不可用，请检查服务配置或稍后重试。")
+    if stage:
+        detail = f"{stage}未完成：{detail}"
+    logger.warning("LLM request failed: stage=%s code=%s upstream_status=%s error_type=%s", diagnostic["stage"], code, diagnostic["http_status"], diagnostic["error_type"])
     return HTTPException(
         status_code=503,
-        detail="模型服务暂时不可用，请检查服务配置或稍后重试。",
+        detail=detail,
+        headers={"X-Error-Code": code},
     )
 
 

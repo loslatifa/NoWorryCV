@@ -1,8 +1,13 @@
 import time
 
+import httpx
+import pytest
 from fastapi.testclient import TestClient
 
 from backend.app.main import create_app
+from backend.app.agents.orchestrator import ResumeTailorOrchestrator
+from backend.app.services.llm.structured import StructuredLLMError
+from backend.app.services.llm.provider import LLMOutputTruncatedError
 
 
 def test_upload_endpoint_accepts_markdown_resume(monkeypatch) -> None:
@@ -249,5 +254,58 @@ def test_upload_endpoint_requires_live_llm_when_strict_mode_enabled(monkeypatch)
     )
 
     assert response.status_code == 503
-    assert response.json()["detail"] == "模型服务暂时不可用，请检查服务配置或稍后重试。"
+    assert "未配置可用的模型服务" in response.json()["detail"]
+    assert response.headers["X-Error-Code"] == "provider_unavailable"
     assert "jd_analyst" not in response.json()["detail"]
+
+
+@pytest.mark.parametrize("status,expected_code,expected_text", [
+    (401, "authentication_failed", "密钥未通过验证"),
+    (402, "quota_exceeded", "额度或余额不足"),
+    (403, "access_denied", "模型权限"),
+    (404, "endpoint_not_found", "接口地址"),
+    (429, "rate_limited", "限流"),
+    (500, "provider_error", "服务暂时异常"),
+])
+def test_parse_upload_explains_provider_failure_without_exposing_raw_error(monkeypatch, caplog, status, expected_code, expected_text):
+    request = httpx.Request("POST", "https://private.invalid/?key=private-secret")
+    response = httpx.Response(status, request=request, json={"error": {"message": "private-secret private-resume"}})
+    cause = httpx.HTTPStatusError("private-secret private-resume", request=request, response=response)
+    error = StructuredLLMError("private-secret private-resume", agent_name="resume_parser")
+    error.__cause__ = cause
+
+    def fail(self, payload):
+        raise error
+
+    monkeypatch.setattr(ResumeTailorOrchestrator, "prepare_confirmation", fail)
+    client = TestClient(create_app())
+    result = client.post("/api/v1/resume/parse-upload", files={"resume_file": ("resume.txt", b"Synthetic resume", "text/plain")}, data={"jd_text": "Synthetic JD"})
+    assert result.status_code == 503
+    assert result.headers["X-Error-Code"] == expected_code
+    assert "简历解析未完成" in result.json()["detail"]
+    assert expected_text in result.json()["detail"]
+    public = result.text + caplog.text
+    assert all(value not in public for value in ("private-secret", "private-resume", "private.invalid"))
+    assert expected_code in caplog.text
+
+
+@pytest.mark.parametrize("cause,code,text", [
+    (httpx.ReadTimeout("private-secret"), "timeout", "超时"),
+    (httpx.ConnectError("private-secret"), "connection_error", "网络或代理"),
+    (ValueError("private-secret"), "invalid_output", "内容不完整"),
+    (LLMOutputTruncatedError("private-secret"), "output_truncated", "长度限制"),
+])
+def test_parse_upload_identifies_failed_preparation_stage(monkeypatch, cause, code, text):
+    error = StructuredLLMError("private-secret", agent_name="jd_analyst")
+    error.__cause__ = cause
+
+    def fail(self, payload):
+        raise error
+
+    monkeypatch.setattr(ResumeTailorOrchestrator, "prepare_confirmation", fail)
+    client = TestClient(create_app())
+    result = client.post("/api/v1/resume/parse-upload", files={"resume_file": ("resume.txt", b"Synthetic resume", "text/plain")}, data={"jd_text": "Synthetic JD"})
+    assert result.status_code == 503
+    assert result.headers["X-Error-Code"] == code
+    assert "岗位分析未完成" in result.json()["detail"] and text in result.json()["detail"]
+    assert "private-secret" not in result.text

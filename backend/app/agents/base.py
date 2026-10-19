@@ -51,7 +51,8 @@ class BaseAgent:
         if not self.llm_service.is_available:
             if self.strict_llm_mode:
                 raise StructuredLLMError(
-                    "Agent '{0}' requires a live LLM provider; heuristic fallback is disabled.".format(self.name)
+                    "Agent '{0}' requires a live LLM provider; heuristic fallback is disabled.".format(self.name),
+                    agent_name=self.name,
                 )
             return fallback_value
         return _NO_FALLBACK

@@ -21,7 +21,7 @@ from backend.app.services.scoring.heuristics import canonicalize_skills, extract
 
 class ResumeParserAgent(BaseAgent):
     name = "resume_parser"
-    llm_metadata = {"max_tokens": 1600, "timeout_seconds": 75}
+    llm_metadata = {"max_tokens": 4096, "timeout_seconds": 75}
     GENERIC_TITLE_LINES = {"resume", "cv", "个人简历", "简历"}
     ACTION_HINTS = {
         "负责",
@@ -100,7 +100,7 @@ class ResumeParserAgent(BaseAgent):
             normalized_profile = self._normalize_profile(profile, resume_text, candidate_notes)
             fact_cards = self._build_fact_cards(normalized_profile, resume_text)
             if not self._has_minimum_signal(normalized_profile, fact_cards):
-                raise StructuredLLMError("Resume parser returned insufficient structured signal.")
+                raise StructuredLLMError("Resume parser returned insufficient structured signal.", agent_name=self.name) from ValueError("Insufficient resume signal.")
             return normalized_profile, fact_cards
         except StructuredLLMError as exc:
             try:
@@ -111,7 +111,7 @@ class ResumeParserAgent(BaseAgent):
                 normalized_profile = self._normalize_profile(compact_profile, resume_text, candidate_notes)
                 fact_cards = self._build_fact_cards(normalized_profile, resume_text)
                 if not self._has_minimum_signal(normalized_profile, fact_cards):
-                    raise StructuredLLMError("Resume parser compact mode returned insufficient structured signal.")
+                    raise StructuredLLMError("Resume parser compact mode returned insufficient structured signal.", agent_name=self.name) from ValueError("Insufficient resume signal.")
                 return normalized_profile, fact_cards
             except StructuredLLMError:
                 return self.fallback_on_error(exc, (fallback_profile, fallback_fact_cards))

@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     llm_provider: str = "stub"
     llm_model: str = ""
     llm_api_key: str = ""
+    deepseek_api_key: str = ""
     llm_base_url: str = "https://api.openai.com/v1"
     llm_timeout_seconds: float = 45.0
     llm_max_retries: int = 2

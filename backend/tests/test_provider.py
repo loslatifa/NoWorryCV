@@ -1,8 +1,56 @@
 import httpx
+import pytest
 
-from backend.app.core.config import get_settings
+from backend.app.core.config import Settings, get_settings
 from backend.app.services.llm import provider as provider_module
-from backend.app.services.llm.provider import OpenAICompatibleProvider, get_llm_provider
+from backend.app.services.llm.provider import LLMOutputTruncatedError, OpenAICompatibleProvider, build_llm_provider, get_llm_provider
+
+
+def test_provider_rejects_explicitly_truncated_output_even_when_json_prefix_is_valid():
+    provider = OpenAICompatibleProvider("fake-key", "fake-model", "https://example.invalid")
+    partial = {"choices": [{"finish_reason": "length", "message": {"content": '{"projects":[]}'}}]}
+    with pytest.raises(LLMOutputTruncatedError):
+        provider._extract_content(partial)
+
+
+def test_official_deepseek_uses_its_dedicated_key_without_reusing_qwen_credentials():
+    settings=Settings(_env_file=None,llm_provider="openai_compatible",llm_base_url="https://api.deepseek.com",
+        llm_model="deepseek-flash",deepseek_api_key="fake-deepseek-key",qwen_api_key="fake-qwen-key")
+    provider=build_llm_provider(settings)
+    assert provider.is_available and provider.api_key=="fake-deepseek-key"
+    assert provider.base_url=="https://api.deepseek.com" and provider.model=="deepseek-flash"
+    assert not build_llm_provider(settings.model_copy(update={"deepseek_api_key":""})).is_available
+    explicit=build_llm_provider(settings.model_copy(update={"llm_api_key":"fake-explicit-key"}))
+    assert explicit.api_key=="fake-explicit-key"
+
+
+@pytest.mark.parametrize("base_url",["https://api.openai.com/v1","https://api.deepseek.com.example/v1","https://dashscope.aliyuncs.com/compatible-mode/v1"])
+def test_deepseek_key_is_not_sent_to_other_services(base_url):
+    settings=Settings(_env_file=None,llm_provider="openai_compatible",llm_base_url=base_url,
+        llm_model="deepseek-flash",deepseek_api_key="fake-deepseek-key",llm_api_key="")
+    assert not build_llm_provider(settings).is_available
+
+
+@pytest.mark.parametrize("metadata,expected",[({},"disabled"),({"enable_thinking":True},"enabled"),({"enable_thinking":False},"disabled")])
+def test_deepseek_official_requests_use_native_thinking_parameter_and_json_output(monkeypatch,metadata,expected):
+    captured={}
+    class Response:
+        def raise_for_status(self):pass
+        def json(self):return {"choices":[{"message":{"content":'{"status":"ok"}'}}]}
+    class Client:
+        def __init__(self,**kwargs):pass
+        def __enter__(self):return self
+        def __exit__(self,*args):return False
+        def post(self,url,headers=None,json=None):
+            captured.update(url=url,payload=json,headers=headers)
+            return Response()
+    monkeypatch.setattr(provider_module.httpx,"Client",Client)
+    provider=OpenAICompatibleProvider("fake-deepseek-key","deepseek-flash","https://api.deepseek.com/")
+    assert provider.complete("Return JSON.","{}",metadata={"expect_json":True,"response_format":"json_object",**metadata})=='{"status":"ok"}'
+    assert captured["url"]=="https://api.deepseek.com/chat/completions"
+    assert captured["payload"]["thinking"]=={"type":expected}
+    assert "enable_thinking" not in captured["payload"]
+    assert captured["payload"]["response_format"]=={"type":"json_object"}
 
 
 def test_provider_falls_back_to_stub_when_credentials_missing(monkeypatch) -> None:

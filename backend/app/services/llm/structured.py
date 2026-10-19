@@ -1,19 +1,26 @@
 import json
+import logging
 import re
 from functools import lru_cache
 from typing import Any, Dict, List, Optional, Type, TypeVar
 
+import httpx
 from pydantic import BaseModel, ValidationError
 
 from backend.app.core.config import get_settings
-from backend.app.services.llm.provider import LLMProvider, get_llm_provider
+from backend.app.services.llm.provider import LLMOutputTruncatedError, LLMProvider, get_llm_provider
 from backend.app.services.prompt_loader import PromptLoader, get_prompt_loader
 
 ModelT = TypeVar("ModelT", bound=BaseModel)
+logger = logging.getLogger(__name__)
 
 
 class StructuredLLMError(RuntimeError):
     """Raised when structured output generation fails after retries."""
+
+    def __init__(self, message: str, agent_name: str = "") -> None:
+        super().__init__(message)
+        self.agent_name = agent_name
 
 
 class StructuredLLMService:
@@ -50,11 +57,12 @@ class StructuredLLMService:
         metadata: Optional[Dict[str, Any]] = None,
     ) -> ModelT:
         if not self.is_available:
-            raise StructuredLLMError("No live LLM provider available.")
+            raise StructuredLLMError("No live LLM provider available.", agent_name=agent_name)
 
         prompt = self.prompt_loader.load(agent_name)
         system_prompt = self._build_system_prompt(prompt)
-        user_prompt = self._build_user_prompt(context, response_model)
+        base_user_prompt = self._build_user_prompt(context, response_model)
+        user_prompt = base_user_prompt
         total_attempts = max_retries or self.max_retries
         last_error: Optional[Exception] = None
         response_format = self.response_format
@@ -84,12 +92,62 @@ class StructuredLLMService:
                 if validation_error is not None:
                     raise validation_error
                 raise ValueError("Provider did not return a JSON object.")
-            except (ValidationError, ValueError, json.JSONDecodeError, RuntimeError, Exception) as exc:
+            except Exception as exc:
                 last_error = exc
+                # Changing output format cannot repair credentials or a missing model.
+                if isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code in {401, 402, 403, 404}:
+                    break
+                if isinstance(exc, LLMOutputTruncatedError):
+                    current_limit = int(request_metadata.get("max_tokens") or 2048)
+                    if current_limit < 8192:
+                        request_metadata["max_tokens"] = min(8192, current_limit * 2)
+                    user_prompt = base_user_prompt + (
+                        "\n\nThe previous response reached the output length limit. Return a complete JSON object. "
+                        "Keep field names and required facts; avoid repeating the same text in multiple fields."
+                    )
+                    logger.warning("Structured output retry: agent=%s reason=output_truncated max_tokens=%s", agent_name, current_limit)
+                    continue
+                if isinstance(exc, (ValidationError, ValueError)):
+                    feedback = self._validation_feedback(exc, response_model)
+                    user_prompt = base_user_prompt + (
+                        "\n\nCorrect the previous output's structure using this feedback: " + feedback
+                        + "\nReturn one complete JSON object matching the target schema. Fix field types and required fields; "
+                        "do not add facts. Use empty values only where the schema allows them."
+                    )
+                    logger.warning("Structured output retry: agent=%s reason=invalid_output issues=%s", agent_name, feedback)
                 if response_format == "json_schema":
                     response_format = "json_object"
 
-        raise StructuredLLMError("Structured output failed for agent '{0}': {1}".format(agent_name, last_error))
+        raise StructuredLLMError("Structured output failed for agent '{0}': {1}".format(agent_name, last_error),
+                                 agent_name=agent_name) from last_error
+
+    def _validation_feedback(self, exc: Exception, response_model: Type[BaseModel]) -> str:
+        if not isinstance(exc, ValidationError):
+            return "The response was empty or was not a complete JSON object."
+        # Error input and free-form messages can contain resume text. Only include
+        # paths from the public schema and allowlisted validation categories.
+        field_names = set()
+
+        def collect_fields(schema):
+            if isinstance(schema, dict):
+                field_names.update(schema.get("properties", {}))
+                for value in schema.values():
+                    collect_fields(value)
+            elif isinstance(schema, list):
+                for value in schema:
+                    collect_fields(value)
+
+        collect_fields(response_model.model_json_schema())
+        categories = {"missing", "string_type", "list_type", "dict_type", "model_type", "model_attributes_type",
+                      "literal_error", "enum", "int_type", "int_parsing", "float_type", "float_parsing",
+                      "bool_type", "bool_parsing", "value_error", "extra_forbidden", "greater_than", "less_than",
+                      "string_too_long", "string_too_short"}
+        issues = []
+        for error in exc.errors(include_url=False, include_input=False, include_context=False)[:6]:
+            path = [part if isinstance(part, int) or part in field_names else "<field>" for part in error["loc"]]
+            category = error["type"] if error["type"] in categories else "validation_error"
+            issues.append({"field": path, "type": category})
+        return json.dumps(issues, ensure_ascii=False)
 
     def _build_system_prompt(self, prompt: str) -> str:
         return (
