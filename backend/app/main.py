@@ -13,6 +13,8 @@ from backend.app.api.v1.history import router as history_router
 from backend.app.api.v1.applications import router as applications_router
 from backend.app.api.v1.quality import router as quality_router
 from backend.app.services.quality import get_quality_store
+from backend.app.api.v1.interviews import router as interviews_router
+from backend.app.services.interviews import get_interview_store
 from backend.app.core.config import get_settings
 from backend.app.services.rate_limit import SlidingWindowRateLimiter
 from backend.app.services.runs.store import get_run_store
@@ -68,9 +70,11 @@ def create_app() -> FastAPI:
         get_task_queue().cleanup_expired()
         get_application_store().cleanup_expired()
         get_quality_store().cleanup_expired()
+        get_interview_store().cleanup_expired()
         profile_prefix = "{0}/candidate-profiles".format(settings.api_prefix)
         if request.method == "POST" and (
             request.url.path in limited_paths
+            or ("/interviews" in request.url.path and request.url.path.endswith(("/interviews", "/answers")))
             or request.url.path == profile_prefix
             or (request.url.path.startswith(profile_prefix + "/")
                 and request.url.path.endswith(("/preview", "/jobs", "/applications")))
@@ -106,6 +110,7 @@ def create_app() -> FastAPI:
     app.include_router(history_router, prefix=settings.api_prefix)
     app.include_router(applications_router, prefix=settings.api_prefix)
     app.include_router(quality_router, prefix=settings.api_prefix)
+    app.include_router(interviews_router, prefix=settings.api_prefix)
     return app
 
 

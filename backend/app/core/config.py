@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     candidate_archive_path: str = str(Path(".dist") / "candidate_archives.sqlite3")
     application_store_path: str = str(Path(".dist") / "applications.sqlite3")
     quality_store_path: str = str(Path(".dist") / "quality.sqlite3")
+    interview_store_path: str = str(Path(".dist") / "interviews.sqlite3")
     task_worker_count: int = 1
     task_max_attempts: int = 3
     anonymous_run_ttl_hours: int = 24

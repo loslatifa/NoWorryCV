@@ -34,7 +34,7 @@ def capture_provenance(processing_mode="full"):
         prompt_digest=digest_files((loader.base_dir / loader.default_version).glob("*.md")),
         scoring_version=SCORING_VERSION,
         scoring_digest=digest_files([agents / "ats.py", root / "backend/app/services/scoring/heuristics.py"]),
-        pipeline_digest=digest_files(list(agents.glob("*.py")) + [root / "backend/app/services/preferences.py", root / "backend/app/schemas/preferences.py", root / "backend/app/services/llm/provider.py", root / "backend/app/services/llm/structured.py"]),
+        pipeline_digest=digest_files(list(agents.glob("*.py")) + [root / "backend/app/services/preferences.py", root / "backend/app/schemas/preferences.py", root / "backend/app/schemas/interview.py", root / "backend/app/services/interviews.py", root / "backend/app/services/llm/provider.py", root / "backend/app/services/llm/structured.py"]),
         processing_mode=processing_mode, strict_mode=settings.llm_strict_mode,
     )
     data["fingerprint"] = hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest()

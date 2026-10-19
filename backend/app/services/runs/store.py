@@ -16,6 +16,7 @@ from backend.app.schemas.jd import KnowledgeReviewCard
 from backend.app.schemas.review import ATSReport, ComplianceReport
 from backend.app.schemas.run_state import DraftVersion, TailorRunJobStatus, TailorRunResult
 from backend.app.schemas.strategy import ResumeDraft
+from backend.app.services.interviews import get_interview_store
 from backend.app.services.profiles import get_candidate_archive_store
 from backend.app.services.provenance import capture_provenance
 from backend.app.services.quality import get_quality_store, record_event
@@ -102,6 +103,7 @@ class PersistentRunStore:
             if existed:
                 self._persist_locked()
                 get_quality_store().delete_run(run_id)
+                get_interview_store().delete_for_run(run_id)
             return existed
 
     def cleanup_expired(self) -> int:
@@ -339,6 +341,7 @@ class PersistentRunStore:
             self._jobs.pop(run_id, None)
             self._access_token_hashes.pop(run_id, None)
             get_quality_store().delete_run(run_id)
+            get_interview_store().delete_for_run(run_id)
         return len(expired_ids)
 
     @staticmethod
