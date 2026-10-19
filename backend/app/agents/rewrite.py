@@ -427,6 +427,9 @@ class ResumeRewriteAgent(BaseAgent):
                 "recommended_focus": gap_analysis.recommended_focus[:6],
             },
             "rewrite_strategy": {
+                "preferences": strategy.preferences.model_dump(mode="json"),
+                "tone_rules": strategy.tone_rules,
+                "revision_notes": strategy.revision_notes,
                 "audience_hint": strategy.audience_hint,
                 "section_priority": strategy.section_priority,
                 "keyword_plan": strategy.keyword_plan[:6],

@@ -1,6 +1,8 @@
 from typing import List, Optional
 from uuid import uuid4
 
+from backend.app.schemas.preferences import ResumePreferences
+
 from pydantic import BaseModel, Field, field_validator
 
 from backend.app.schemas.candidate import CandidateProfile
@@ -32,6 +34,7 @@ class TailorRunInput(BaseModel):
     preanalyzed_jd_profile: Optional[JDProfile] = None
     target_company: str = Field(default="", max_length=120)
     target_role: str = Field(default="", max_length=120)
+    preferences: ResumePreferences = Field(default_factory=ResumePreferences)
 
     @field_validator("max_iterations")
     @classmethod
@@ -58,6 +61,7 @@ class TailorRunState(BaseModel):
     resolved_language: str = "auto"
     candidate_profile: Optional[CandidateProfile] = None
     fact_cards: List[FactCard] = Field(default_factory=list)
+    detected_jd_profile: Optional[JDProfile] = None
     jd_profile: Optional[JDProfile] = None
     jd_review_doc: Optional[JDReviewDocument] = None
     gap_analysis: Optional[GapAnalysis] = None
@@ -96,6 +100,9 @@ class TailorRunResult(BaseModel):
     final_package: FinalResumePackage
     draft_versions: List[DraftVersion] = Field(default_factory=list)
     active_version_id: str = ""
+    preferences: ResumePreferences = Field(default_factory=ResumePreferences)
+    detected_jd_profile: Optional[JDProfile] = None
+    resolved_language: str = "unknown"
 
 
 class StageExecutionRecord(BaseModel):

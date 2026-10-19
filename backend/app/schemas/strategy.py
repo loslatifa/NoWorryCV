@@ -1,5 +1,7 @@
 from typing import Dict, List, Optional
 
+from backend.app.schemas.preferences import ResumePreferences
+
 from pydantic import BaseModel, Field
 
 from backend.app.schemas.common import TraceabilityRecord
@@ -17,6 +19,7 @@ class GapAnalysis(BaseModel):
 
 
 class RewriteStrategy(BaseModel):
+    preferences: ResumePreferences = Field(default_factory=ResumePreferences)
     target_resume_style: str = "ats_clean"
     audience_hint: str = "general"
     section_priority: List[str] = Field(

@@ -4,6 +4,8 @@ from typing import Optional
 from fastapi import APIRouter, Header, HTTPException
 from fastapi.responses import Response
 
+from backend.app.schemas.preferences import PreferencesSave
+from backend.app.services.preferences import apply_jd_preferences, merge_preferences
 from backend.app.agents.orchestrator import ResumeTailorOrchestrator
 from backend.app.api.v1.routes import _llm_required_error, _start_tailor_job
 from backend.app.schemas.profile import (
@@ -59,6 +61,18 @@ def update_profile(
     return archive
 
 
+@router.patch("/{archive_id}/preferences", response_model=CandidateArchive)
+def save_profile_preferences(archive_id: str, payload: PreferencesSave,
+                             x_profile_token: Optional[str] = Header(None)):
+    try:
+        archive = get_candidate_archive_store().save_preferences(archive_id, x_profile_token or "", payload)
+    except ProfileRevisionConflict as exc:
+        raise HTTPException(409, str(exc)) from exc
+    if archive is None:
+        raise HTTPException(404, "基础档案不存在或无权访问。")
+    return archive
+
+
 @router.delete("/{archive_id}", status_code=204)
 def delete_profile(archive_id: str, x_profile_token: Optional[str] = Header(None)) -> Response:
     if not get_candidate_archive_store().delete_authorized(archive_id, x_profile_token or ""):
@@ -103,7 +117,8 @@ def preview_profile_for_jd(
     align_confirmed_profile(candidate, archive.fact_cards)
     try:
         jd = orchestrator.jd_analyst.run(payload.jd_text)
-        gap = orchestrator.gap_analysis.run(candidate, archive.fact_cards, jd)
+        effective_jd = apply_jd_preferences(jd, merge_preferences(archive.preferences, payload.preferences))
+        gap = orchestrator.gap_analysis.run(candidate, archive.fact_cards, effective_jd)
     except StructuredLLMError as exc:
         raise _llm_required_error(exc) from exc
     return ResumeParsePreview(
@@ -122,6 +137,7 @@ def create_profile_job(
     archive = _get_archive(archive_id, x_profile_token)
     _check_revision(archive, payload)
     run_input = TailorRunInput(
+        preferences=merge_preferences(archive.preferences, payload.preferences),
         resume_text=archive_resume_text(archive), jd_text=payload.jd_text,
         candidate_notes=payload.candidate_notes, output_language=payload.output_language,
         max_iterations=payload.max_iterations,

@@ -14,6 +14,7 @@ from backend.app.agents.interview_prep import InterviewPrepAgent
 from backend.app.agents.resume_parser import ResumeParserAgent
 from backend.app.agents.rewrite import ResumeRewriteAgent
 from backend.app.agents.strategy import StrategyAgent
+from backend.app.services.preferences import apply_jd_preferences, apply_strategy_preferences, effective_language
 from backend.app.core.config import get_settings
 from backend.app.schemas.jd import JDProfile, KnowledgeReviewCard
 from backend.app.schemas.prep import JDReviewDocument
@@ -240,11 +241,9 @@ class ResumeTailorOrchestrator:
                 state.input.jd_text,
                 force_fallback=self._prefer_fast_mode(state.input),
             )
-        state.jd_profile = jd_profile
-        if state.input.output_language == "auto":
-            state.resolved_language = jd_profile.language or state.resolved_language
-        else:
-            state.resolved_language = state.input.output_language
+        state.detected_jd_profile = jd_profile.model_copy(deep=True)
+        state.jd_profile = apply_jd_preferences(jd_profile, state.input.preferences)
+        state.resolved_language = effective_language(state.input.output_language, state.input.preferences, jd_profile.language)
         state.execution_log.append(
             self.jd_analyst.record(
                 "Parsed JD into structured profile.",
@@ -385,7 +384,9 @@ class ResumeTailorOrchestrator:
             state.jd_profile,
             state.resolved_language,
             force_fallback=self._prefer_fast_mode(state.input),
+            preferences=state.input.preferences,
         )
+        state.rewrite_strategy = apply_strategy_preferences(state.rewrite_strategy, state.input.preferences)
         state.execution_log.append(
             self.strategy_agent.record(
                 "Created initial rewrite strategy.",
@@ -493,6 +494,7 @@ class ResumeTailorOrchestrator:
             latest_review.critic_report,
             force_fallback=self._prefer_fast_mode(state.input),
         )
+        state.rewrite_strategy = apply_strategy_preferences(state.rewrite_strategy, state.input.preferences)
         state.execution_log.append(
             self.strategy_agent.record(
                 "Refined rewrite strategy after review feedback.",
@@ -623,6 +625,8 @@ class ResumeTailorOrchestrator:
             drafts=state.drafts,
             reviews=state.reviews,
             final_package=state.final_package,
+            preferences=state.input.preferences, detected_jd_profile=state.detected_jd_profile,
+            resolved_language=state.resolved_language,
         )
 
     def _derive_stop_reason(self, state: TailorRunState) -> str:

@@ -103,6 +103,22 @@ class CandidateArchiveStore:
             )
             return archive
 
+    def save_preferences(self, archive_id, token, payload):
+        with self._connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            archive = self._authorized_archive(connection, archive_id, token)
+            if archive is None:
+                return None
+            if archive.preferences_revision != payload.expected_preferences_revision:
+                raise ProfileRevisionConflict("常用偏好已更新，请重新载入后再保存。")
+            if archive.preferences != payload.preferences:
+                archive.preferences = payload.preferences.model_copy(deep=True)
+                archive.preferences_revision += 1
+                archive.updated_at = datetime.now(timezone.utc).isoformat()
+                connection.execute("UPDATE candidate_archives SET archive_json = ? WHERE id = ?",
+                                   (archive.model_dump_json(), archive_id))
+            return archive
+
     def delete_authorized(self, archive_id: str, token: str) -> bool:
         with self._connection() as connection:
             connection.execute("BEGIN IMMEDIATE")

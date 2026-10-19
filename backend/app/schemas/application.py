@@ -1,13 +1,17 @@
 from typing import Any, Dict, List, Literal, Optional
 
+from backend.app.schemas.preferences import ResumePreferences
+
 from pydantic import BaseModel, Field, HttpUrl, model_validator
 
 from backend.app.schemas.candidate import CandidateProfile
 from backend.app.schemas.common import FactCard
 from backend.app.schemas.strategy import ResumeDraft
+from backend.app.schemas.jd import JDProfile
 
 
 class ApplicationCreate(BaseModel):
+    preferences: Optional[ResumePreferences] = None
     page_url: HttpUrl
     job_url: Optional[HttpUrl] = None
     jd_text: str = Field(min_length=20, max_length=30000)
@@ -72,3 +76,5 @@ class ApplicationRecord(BaseModel):
     risk_notes: List[str] = Field(default_factory=list)
     change_log: List[str] = Field(default_factory=list)
     fill_report: Optional[ApplicationFillReport] = None
+    resolved_language: str = "auto"
+    preferences: ResumePreferences = Field(default_factory=ResumePreferences)

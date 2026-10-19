@@ -9,6 +9,8 @@ from urllib.parse import quote
 from fastapi import APIRouter, File, Form, Header, HTTPException, UploadFile
 from fastapi.responses import Response
 
+from backend.app.services.preferences import export_preferences, target_pages
+from backend.app.schemas.preferences import PREFERENCE_OPTIONS, ResumePreferences
 from backend.app.agents.orchestrator import ResumeTailorOrchestrator
 from backend.app.agents.ats import ATSScoringAgent
 from backend.app.agents.compliance import TruthfulnessComplianceAgent
@@ -99,6 +101,14 @@ async def parse_resume_upload(
         gap_analysis=gap_analysis,
         follow_up_questions=follow_up_questions,
     )
+
+
+@router.get("/resume-preferences")
+def preference_options():
+    from backend.app.services.template_catalog import public_templates, import_issues
+    return {"defaults": ResumePreferences().model_dump(), "options": PREFERENCE_OPTIONS,
+            "templates": public_templates(), "template_issues": import_issues()}
+
 
 
 @router.post("/jd/analyze", response_model=JDProfile)
@@ -295,7 +305,10 @@ def preview_resume_export(
     job = _get_authorized_run(run_id, x_run_token)
     if job.result is None:
         raise HTTPException(status_code=404, detail="Completed run not found.")
-    pdf_bytes = build_pdf(payload.draft, job.result.candidate_profile)
+    preferences = export_preferences(job.result.preferences, job.result.resolved_language)
+    if payload.template is not None:
+        preferences = preferences.model_copy(update={"template": payload.template})
+    pdf_bytes = build_pdf(payload.draft, job.result.candidate_profile, preferences)
     page_count = pdf_page_count(pdf_bytes)
     return Response(
         content=pdf_bytes,
@@ -304,7 +317,9 @@ def preview_resume_export(
             "Cache-Control": "no-store",
             "Content-Disposition": "inline; filename=resume-preview.pdf",
             "X-Page-Count": str(page_count),
-            "X-Overflow": "true" if page_count > 1 else "false",
+            "X-Overflow": "true" if page_count > target_pages(job.result.preferences) else "false",
+            "X-Target-Pages": job.result.preferences.page_count,
+            "X-Resume-Template": preferences.template,
         },
     )
 
@@ -320,11 +335,14 @@ def export_resume(
     if job.result is None:
         raise HTTPException(status_code=404, detail="Completed run not found.")
     normalized_format = export_format.lower()
+    preferences = export_preferences(job.result.preferences, job.result.resolved_language)
+    if payload.template is not None:
+        preferences = preferences.model_copy(update={"template": payload.template})
     if normalized_format == "docx":
-        content = build_docx(payload.draft, job.result.candidate_profile)
+        content = build_docx(payload.draft, job.result.candidate_profile, preferences)
         media_type = DOCX_MEDIA_TYPE
     elif normalized_format == "pdf":
-        content = build_pdf(payload.draft, job.result.candidate_profile)
+        content = build_pdf(payload.draft, job.result.candidate_profile, preferences)
         media_type = PDF_MEDIA_TYPE
     else:
         raise HTTPException(status_code=400, detail="Export format must be docx or pdf.")
@@ -336,6 +354,7 @@ def export_resume(
         media_type=media_type,
         headers={
             "Cache-Control": "no-store",
+            "X-Resume-Template": preferences.template,
             "Content-Disposition": (
                 "attachment; filename=tailored-resume.{0}; filename*=UTF-8''{1}".format(
                     normalized_format,
