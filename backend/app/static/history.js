@@ -163,6 +163,7 @@ async function refreshRunHistory() {
     const payload = await response.json();
     if (sequence !== historyRequestSequence) return;
     historyItems = payload.items;
+    window.refreshQualityDashboard?.();
     if (payload.unavailable_run_ids.length) {
       try {
         localStorage.setItem("noworrycv-run-history", JSON.stringify(rememberedHistoryRuns().filter((item) => !payload.unavailable_run_ids.includes(item.id))));

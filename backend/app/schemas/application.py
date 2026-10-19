@@ -8,6 +8,7 @@ from backend.app.schemas.candidate import CandidateProfile
 from backend.app.schemas.common import FactCard
 from backend.app.schemas.strategy import ResumeDraft
 from backend.app.schemas.jd import JDProfile
+from backend.app.schemas.quality import GenerationProvenance
 
 
 class ApplicationCreate(BaseModel):
@@ -76,5 +77,10 @@ class ApplicationRecord(BaseModel):
     risk_notes: List[str] = Field(default_factory=list)
     change_log: List[str] = Field(default_factory=list)
     fill_report: Optional[ApplicationFillReport] = None
+    version_id: str = ""
+    jd_profile: Optional[JDProfile] = None
+    jd_review: str = ""
+    interview_prep: str = ""
     resolved_language: str = "auto"
     preferences: ResumePreferences = Field(default_factory=ResumePreferences)
+    provenance: GenerationProvenance = Field(default_factory=GenerationProvenance)

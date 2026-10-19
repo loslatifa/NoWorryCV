@@ -17,6 +17,8 @@ from backend.app.schemas.review import ATSReport, ComplianceReport
 from backend.app.schemas.run_state import DraftVersion, TailorRunJobStatus, TailorRunResult
 from backend.app.schemas.strategy import ResumeDraft
 from backend.app.services.profiles import get_candidate_archive_store
+from backend.app.services.provenance import capture_provenance
+from backend.app.services.quality import get_quality_store, record_event
 
 
 class VersionConflictError(ValueError):
@@ -32,7 +34,7 @@ class PersistentRunStore:
         self._access_token_hashes: Dict[str, str] = {}
         self._load()
 
-    def create(self, status_message: str, review_cards: Optional[List[KnowledgeReviewCard]] = None) -> TailorRunJobStatus:
+    def create(self, status_message: str, review_cards: Optional[List[KnowledgeReviewCard]] = None, provenance=None) -> TailorRunJobStatus:
         run_id = str(uuid4())
         access_token = secrets.token_urlsafe(32)
         now = datetime.now(timezone.utc)
@@ -45,12 +47,14 @@ class PersistentRunStore:
             current_stage="queued",
             status_message=status_message,
             review_cards=review_cards or [],
+            provenance=provenance or capture_provenance(),
         )
         with self._lock:
             self._cleanup_expired_locked(now)
             self._jobs[run_id] = job
             self._access_token_hashes[run_id] = self._hash_token(access_token)
             self._persist_locked()
+        record_event(job, "started", event_id=run_id + ":started")
         return job.model_copy(update={"access_token": access_token}, deep=True)
 
     def get(self, run_id: str) -> Optional[TailorRunJobStatus]:
@@ -97,6 +101,7 @@ class PersistentRunStore:
             self._access_token_hashes.pop(run_id, None)
             if existed:
                 self._persist_locked()
+                get_quality_store().delete_run(run_id)
             return existed
 
     def cleanup_expired(self) -> int:
@@ -148,11 +153,12 @@ class PersistentRunStore:
                     draft=draft.model_copy(deep=True),
                     compliance_report=review.compliance_report.model_copy(deep=True),
                     ats_report=review.ats_report.model_copy(deep=True),
+                    provenance=result.provenance.model_copy(deep=True),
                 ))
         if result.draft_versions:
             result.active_version_id = result.draft_versions[-1].id
         job = self.get(run_id)
-        return self.update(
+        completed = self.update(
             run_id,
             status="completed",
             current_stage="completed",
@@ -162,6 +168,9 @@ class PersistentRunStore:
             error_message="",
             target_job_title=(job.target_job_title if job else "") or result.jd_profile.job_title,
         )
+        if completed:
+            record_event(completed, "completed", result.active_version_id, event_id=run_id + ":completed")
+        return completed
 
     def save_draft_version(
         self,
@@ -179,6 +188,7 @@ class PersistentRunStore:
             draft=draft.model_copy(deep=True),
             compliance_report=compliance_report.model_copy(deep=True),
             ats_report=ats_report.model_copy(deep=True),
+            provenance=capture_provenance("partial_rewrite" if source == "ai_partial" else "manual_edit"),
         )
         with self._lock:
             job = self._jobs.get(run_id)
@@ -192,6 +202,8 @@ class PersistentRunStore:
             updated = job.model_copy(update={"result": result}, deep=True)
             self._jobs[run_id] = updated
             self._persist_locked()
+        if source == "manual" and draft.model_dump(exclude={"markdown", "traceability"}) != job.result.final_package.draft.model_dump(exclude={"markdown", "traceability"}):
+            record_event(updated, "edit", version.id)
         return version.model_copy(deep=True)
 
     def mutate_version(self, run_id: str, version_id: str, action: str, **changes):
@@ -233,6 +245,8 @@ class PersistentRunStore:
                 raise ValueError("Unsupported version action")
             self._jobs[run_id] = job.model_copy(update={"result": result}, deep=True)
             self._persist_locked()
+            if action == "delete":
+                get_quality_store().delete_version(run_id, version_id)
             return version.model_copy(deep=True), result.model_copy(deep=True)
 
     def mark_failed(
@@ -324,6 +338,7 @@ class PersistentRunStore:
         for run_id in expired_ids:
             self._jobs.pop(run_id, None)
             self._access_token_hashes.pop(run_id, None)
+            get_quality_store().delete_run(run_id)
         return len(expired_ids)
 
     @staticmethod

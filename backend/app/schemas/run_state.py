@@ -11,6 +11,7 @@ from backend.app.schemas.jd import JDProfile, KnowledgeReviewCard
 from backend.app.schemas.prep import InterviewPrepDocument, JDReviewDocument
 from backend.app.schemas.review import ATSReport, ComplianceReport, ReviewBundle
 from backend.app.schemas.strategy import FinalResumePackage, GapAnalysis, ResumeDraft, RewriteStrategy
+from backend.app.schemas.quality import GenerationProvenance
 
 
 class FollowUpQuestion(BaseModel):
@@ -35,6 +36,7 @@ class TailorRunInput(BaseModel):
     target_company: str = Field(default="", max_length=120)
     target_role: str = Field(default="", max_length=120)
     preferences: ResumePreferences = Field(default_factory=ResumePreferences)
+    provenance: Optional[GenerationProvenance] = None
 
     @field_validator("max_iterations")
     @classmethod
@@ -72,6 +74,7 @@ class TailorRunState(BaseModel):
     final_package: Optional[FinalResumePackage] = None
     stop_reason: str = ""
     execution_log: List[AgentExecutionRecord] = Field(default_factory=list)
+    provenance_history: List[GenerationProvenance] = Field(default_factory=list)
 
 
 class DraftVersion(BaseModel):
@@ -83,6 +86,7 @@ class DraftVersion(BaseModel):
     draft: ResumeDraft
     compliance_report: ComplianceReport
     ats_report: ATSReport
+    provenance: GenerationProvenance = Field(default_factory=GenerationProvenance)
 
 
 class TailorRunResult(BaseModel):
@@ -103,6 +107,8 @@ class TailorRunResult(BaseModel):
     preferences: ResumePreferences = Field(default_factory=ResumePreferences)
     detected_jd_profile: Optional[JDProfile] = None
     resolved_language: str = "unknown"
+    provenance: GenerationProvenance = Field(default_factory=GenerationProvenance)
+    provenance_history: List[GenerationProvenance] = Field(default_factory=list)
 
 
 class StageExecutionRecord(BaseModel):
@@ -124,6 +130,7 @@ class TailorRunJobStatus(BaseModel):
     jd_text: str = ""
     archived: bool = False
     access_token: Optional[str] = None
+    provenance: GenerationProvenance = Field(default_factory=GenerationProvenance)
     created_at: str = ""
     expires_at: str = ""
     status: str = "queued"

@@ -10,6 +10,8 @@ from fastapi import APIRouter, File, Form, Header, HTTPException, UploadFile
 from fastapi.responses import Response
 
 from backend.app.services.preferences import export_preferences, target_pages
+from backend.app.services.provenance import capture_provenance
+from backend.app.services.quality import record_event, saved_version_id
 from backend.app.schemas.preferences import PREFERENCE_OPTIONS, ResumePreferences
 from backend.app.agents.orchestrator import ResumeTailorOrchestrator
 from backend.app.agents.ats import ATSScoringAgent
@@ -205,10 +207,11 @@ def _start_tailor_job(
     candidate_archive_revision: int = 0,
 ) -> TailorRunJobStatus:
     store = get_run_store()
-    job = store.create("任务已创建，等待开始。")
+    payload = payload.model_copy(update={"provenance": capture_provenance(payload.processing_mode)}, deep=True)
+    job = store.create("任务已创建，等待开始。", provenance=payload.provenance)
     normalized_key = (idempotency_key or "").strip()
     if not normalized_key:
-        payload_fingerprint = hashlib.sha256(payload.model_dump_json().encode("utf-8")).hexdigest()
+        payload_fingerprint = hashlib.sha256(json.dumps(payload.model_dump(mode="json", exclude={"provenance"}), sort_keys=True).encode("utf-8")).hexdigest()
         normalized_key = "auto:{0}:{1}".format(payload_fingerprint, int(time.time() // 60))
     queued_job = store.update(
         job.run_id,
@@ -254,11 +257,13 @@ def get_draft_diff(
     job = _get_authorized_run(run_id, x_run_token)
     if job.result is None:
         raise HTTPException(status_code=404, detail="Completed run not found.")
-    return build_draft_diff(
+    response = build_draft_diff(
         job.result.candidate_profile,
         job.result.fact_cards,
         payload.draft,
     )
+    response.version_id = saved_version_id(job.result, payload.draft)
+    return response
 
 
 @router.post("/tailor-runs/{run_id}/score", response_model=JDMatchScoreResponse)
@@ -349,6 +354,8 @@ def export_resume(
 
     filename = "{0}.{1}".format(sanitize_filename(payload.filename), normalized_format)
     encoded_filename = quote(filename, safe="")
+    version_id = saved_version_id(job.result, payload.draft)
+    record_event(job, "export", version_id)
     return Response(
         content=content,
         media_type=media_type,
@@ -522,7 +529,7 @@ def get_privacy_summary() -> dict:
         "max_upload_bytes": settings.max_upload_bytes,
         "supported_file_types": sorted(SUPPORTED_RESUME_SUFFIXES),
         "saved_profile_retention": "用户明确同意保存的基础档案保留至主动删除；历史任务仍按匿名任务期限清理。",
-        "usage": "简历与 JD 仅用于解析、生成、审查、编辑和导出本次求职材料。",
+        "usage": "简历与 JD 用于解析、生成、审查、编辑和导出本次求职材料；本地记录版本反馈及接受、拒绝、保存编辑、导出行为用于质量分析，反馈不收集自由文本并随任务删除或过期清理。",
     }
 
 

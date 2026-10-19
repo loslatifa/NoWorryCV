@@ -8,6 +8,7 @@ from backend.app.services.runs.store import reset_run_store_cache
 from backend.app.services.runs.queue import reset_task_queue_cache
 from backend.app.services.profiles import reset_candidate_archive_store_cache
 from backend.app.services.applications import get_application_store
+from backend.app.services.quality import get_quality_store
 
 
 @pytest.fixture(autouse=True)
@@ -18,10 +19,12 @@ def reset_runtime_caches(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("TASK_QUEUE_PATH", str(tmp_path / "task_queue.sqlite3"))
     monkeypatch.setenv("CANDIDATE_ARCHIVE_PATH", str(tmp_path / "candidate_archives.sqlite3"))
     monkeypatch.setenv("APPLICATION_STORE_PATH", str(tmp_path / "applications.sqlite3"))
+    monkeypatch.setenv("QUALITY_STORE_PATH", str(tmp_path / "quality.sqlite3"))
     monkeypatch.setenv("QWEN_API_KEY", "")
     monkeypatch.setenv("DASHSCOPE_API_KEY", "")
     monkeypatch.setenv("LLM_API_KEY", "")
     monkeypatch.setenv("DEEPSEEK_API_KEY", "")
+    get_quality_store.cache_clear()
     reset_settings_cache()
     reset_llm_provider_cache()
     reset_structured_llm_service_cache()
@@ -31,6 +34,7 @@ def reset_runtime_caches(monkeypatch, tmp_path) -> None:
     reset_candidate_archive_store_cache()
     get_application_store.cache_clear()
     yield
+    get_quality_store.cache_clear()
     reset_settings_cache()
     reset_llm_provider_cache()
     reset_structured_llm_service_cache()

@@ -21,8 +21,10 @@ from backend.app.schemas.prep import JDReviewDocument
 from backend.app.schemas.review import ReviewBundle
 from backend.app.schemas.run_state import TailorRunInput, TailorRunResult, TailorRunState
 from backend.app.schemas.strategy import FinalResumePackage
+from backend.app.schemas.quality import GenerationProvenance
 from backend.app.services.follow_up_questions import build_follow_up_questions
 from backend.app.services.confirmed_profile import align_confirmed_profile
+from backend.app.services.provenance import capture_provenance
 
 
 class RunCancelledError(RuntimeError):
@@ -102,6 +104,7 @@ class ResumeTailorOrchestrator:
         )
 
     def run(self, payload: TailorRunInput, run_id: Optional[str] = None) -> TailorRunResult:
+        payload = payload.model_copy(update={"provenance": capture_provenance(payload.processing_mode)}, deep=True)
         generated_run_id = run_id
         if not generated_run_id:
             field = TailorRunState.model_fields["run_id"]
@@ -111,6 +114,7 @@ class ResumeTailorOrchestrator:
             run_id=generated_run_id,
             input=payload,
             resolved_language=payload.output_language,
+            provenance_history=[payload.provenance],
         )
         final_state = self.graph.invoke(initial_state.model_dump(mode="json"))
         state = TailorRunState.model_validate(final_state)
@@ -141,6 +145,15 @@ class ResumeTailorOrchestrator:
             )
             raw_state = state.model_dump(mode="json")
             next_stage = "analyze_jd"
+
+        runtime_version = capture_provenance(payload.processing_mode)
+        if state.input.provenance is None:
+            state.input.provenance = GenerationProvenance(processing_mode=payload.processing_mode) if checkpoint_state else runtime_version
+        if not state.provenance_history:
+            state.provenance_history = [state.input.provenance]
+        if state.provenance_history[-1].fingerprint != runtime_version.fingerprint:
+            state.provenance_history.append(runtime_version)
+        raw_state = state.model_dump(mode="json")
 
         stage_nodes = {
             "analyze_jd": self._analyze_jd_node,
@@ -627,6 +640,8 @@ class ResumeTailorOrchestrator:
             final_package=state.final_package,
             preferences=state.input.preferences, detected_jd_profile=state.detected_jd_profile,
             resolved_language=state.resolved_language,
+            provenance=state.input.provenance,
+            provenance_history=state.provenance_history,
         )
 
     def _derive_stop_reason(self, state: TailorRunState) -> str:
