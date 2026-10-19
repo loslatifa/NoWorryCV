@@ -1,5 +1,5 @@
 import re
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from backend.app.agents.base import BaseAgent
 from backend.app.agents.base import _NO_FALLBACK
@@ -168,7 +168,7 @@ class ResumeRewriteAgent(BaseAgent):
         except StructuredLLMError as exc:
             first_error = exc
         else:
-            first_error = StructuredLLMError("Rewrite agent returned incomplete structured output.")
+            first_error = StructuredLLMError("Rewrite agent returned incomplete structured output.", agent_name=self.name)
 
         try:
             compact_output = self.invoke_structured(
@@ -306,38 +306,37 @@ class ResumeRewriteAgent(BaseAgent):
         fallback: ResumeDraft,
         allow_fallback_merge: bool = False,
     ) -> ResumeDraft:
-        fact_id_set = {card.id for card in fact_cards}
-        used_fallback_sections = False
-        experience_section = self._convert_sections(
+        experience_section, experience_traces = self._convert_sections(
             output.experience_section,
             fact_cards,
             gap_analysis,
             strategy.audience_hint,
+            "experience_section",
         )
         if allow_fallback_merge and self._should_use_fallback_sections(experience_section, fallback.experience_section):
             experience_section = fallback.experience_section
-            used_fallback_sections = True
-        project_section = self._convert_sections(
+            experience_traces = [record.model_copy(deep=True) for record in fallback.traceability
+                                 if record.draft_span.startswith("experience_section.")]
+        project_section, project_traces = self._convert_sections(
             output.project_section,
             fact_cards,
             gap_analysis,
             strategy.audience_hint,
+            "project_section",
         )
         if strategy.include_projects and allow_fallback_merge and self._should_use_fallback_sections(project_section, fallback.project_section):
             project_section = fallback.project_section
-            used_fallback_sections = True
+            project_traces = [record.model_copy(deep=True) for record in fallback.traceability
+                              if record.draft_span.startswith("project_section.")]
         education_section = output.education_section
         if allow_fallback_merge and self._should_use_fallback_education(education_section, fallback.education_section):
             education_section = fallback.education_section
-            used_fallback_sections = True
         skills_section = self._normalize_skills(output.skills_section, fact_cards, fallback.skills_section)
         headline = self._sanitize_headline(output.headline, fallback.headline, language)
         summary = self._sanitize_summary(output.summary, fallback.summary, language)
         if self._should_use_fallback_summary(summary, fallback.summary, strategy.audience_hint, jd_profile, language):
             summary = fallback.summary
-        traceability = self._build_traceability(output.experience_section, output.project_section, fact_id_set, fact_cards)
-        if used_fallback_sections or not traceability:
-            traceability = fallback.traceability
+        traceability = experience_traces + project_traces
         markdown = self._render_markdown(
             headline=headline,
             summary=summary,
@@ -491,11 +490,17 @@ class ResumeRewriteAgent(BaseAgent):
         fact_cards: List[FactCard],
         gap_analysis: GapAnalysis,
         audience_hint: str,
-    ) -> List[ResumeSectionItem]:
+        section_name: str,
+    ) -> Tuple[List[ResumeSectionItem], List[TraceabilityRecord]]:
         fact_lookup = {card.id: card.text for card in fact_cards}
+        exact_text_map: Dict[str, List[str]] = {}
+        for card in fact_cards:
+            exact_text_map.setdefault(normalize_token(self._sanitize_bullet_text(card.text)), []).append(card.id)
         converted_sections: List[ResumeSectionItem] = []
+        traceability: List[TraceabilityRecord] = []
         for section in sections:
             cleaned_bullets = []
+            ids_by_text: Dict[str, List[str]] = {}
             for bullet in section.bullets:
                 cleaned = self._sanitize_bullet_text(bullet.text)
                 cleaned = self._restore_fact_grounded_bullet(
@@ -505,8 +510,15 @@ class ResumeRewriteAgent(BaseAgent):
                     gap_analysis,
                     audience_hint,
                 )
-                if cleaned:
-                    cleaned_bullets.append(cleaned)
+                if not cleaned:
+                    continue
+                key = normalize_token(cleaned)
+                fact_ids = exact_text_map.get(key) or [fact_id for fact_id in bullet.fact_ids if fact_id in fact_lookup]
+                if not fact_ids:
+                    # Uncited paraphrases cannot acquire evidence from their old position.
+                    continue
+                ids_by_text[key] = list(dict.fromkeys(ids_by_text.get(key, []) + fact_ids))
+                cleaned_bullets.append(cleaned)
             if cleaned_bullets:
                 cleaned_bullets = self._rank_bullets(cleaned_bullets, gap_analysis, None, audience_hint)
                 converted_sections.append(
@@ -516,56 +528,20 @@ class ResumeRewriteAgent(BaseAgent):
                         bullets=cleaned_bullets,
                     )
                 )
-        return converted_sections
-
-    def _build_traceability(
-        self,
-        experience_sections: List[TraceableSectionItem],
-        project_sections: List[TraceableSectionItem],
-        fact_id_set: set,
-        fact_cards: List[FactCard],
-    ) -> List[TraceabilityRecord]:
-        traceability: List[TraceabilityRecord] = []
-        exact_text_map = {}
-        for card in fact_cards:
-            exact_text_map.setdefault(card.text, []).append(card.id)
-
-        for section_index, section in enumerate(experience_sections, start=1):
-            for bullet_index, bullet in enumerate(section.bullets, start=1):
-                cleaned_text = self._sanitize_bullet_text(bullet.text)
-                if not cleaned_text:
-                    continue
-                fact_ids = [fact_id for fact_id in bullet.fact_ids if fact_id in fact_id_set]
-                if not fact_ids and bullet.text in exact_text_map:
-                    fact_ids = exact_text_map[bullet.text]
-                traceability.append(
-                    TraceabilityRecord(
-                        draft_span="experience_section.{0}.bullets.{1}".format(section_index, bullet_index),
-                        fact_ids=fact_ids,
-                    )
-                )
-        for section_index, section in enumerate(project_sections, start=1):
-            for bullet_index, bullet in enumerate(section.bullets, start=1):
-                cleaned_text = self._sanitize_bullet_text(bullet.text)
-                if not cleaned_text:
-                    continue
-                fact_ids = [fact_id for fact_id in bullet.fact_ids if fact_id in fact_id_set]
-                if not fact_ids and bullet.text in exact_text_map:
-                    fact_ids = exact_text_map[bullet.text]
-                traceability.append(
-                    TraceabilityRecord(
-                        draft_span="project_section.{0}.bullets.{1}".format(section_index, bullet_index),
-                        fact_ids=fact_ids,
-                    )
-                )
-        return traceability
+                for bullet_index, text in enumerate(cleaned_bullets, 1):
+                    traceability.append(TraceabilityRecord(
+                        draft_span=f"{section_name}.{len(converted_sections)}.bullets.{bullet_index}",
+                        fact_ids=ids_by_text[normalize_token(text)],
+                    ))
+        return converted_sections, traceability
 
     def _has_traceable_content(self, draft: ResumeDraft) -> bool:
-        bullets = sum(len(section.bullets) for section in draft.experience_section + draft.project_section)
-        if bullets == 0:
-            return False
-        traced = sum(1 for record in draft.traceability if record.fact_ids)
-        return traced >= max(1, int(bullets * 0.8))
+        spans = [f"{section_name}.{section_index}.bullets.{bullet_index}"
+                 for section_name in ("experience_section", "project_section")
+                 for section_index, section in enumerate(getattr(draft, section_name), 1)
+                 for bullet_index, _bullet in enumerate(section.bullets, 1)]
+        traces = {record.draft_span:record.fact_ids for record in draft.traceability}
+        return bool(spans) and all(traces.get(span) for span in spans)
 
     def _is_structured_output_incomplete(
         self,
@@ -573,7 +549,7 @@ class ResumeRewriteAgent(BaseAgent):
         fallback: ResumeDraft,
         strategy: RewriteStrategy,
     ) -> bool:
-        if not output.experience_section:
+        if fallback.experience_section and not output.experience_section:
             return True
         if len(output.experience_section) < len(fallback.experience_section):
             return True
