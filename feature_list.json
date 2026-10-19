@@ -790,6 +790,40 @@
         "完整段落随档案保存和复用，后台细粒度事实继续用于生成；展示段落不加入模型 JSON Schema，避免重复输出增加解析负担，并检查过期段落与事实的一致性。",
         "全量后端测试 313 项及前端段落逻辑测试 7 项通过，JavaScript 语法与 diff 检查通过。真实浏览器使用隔离 stub 后端验证两段工作和两个项目各含五个事实点、局部修改保留其余四个 ID、新增与删除经历、补充归属、保存及刷新复用、追问补充和生成，控制台无错误；320 / 390 / 768 / 1024 / 1440 像素宽度无横向溢出。"
       ]
+    },
+    {
+      "id": "P1-007",
+      "priority": "P1",
+      "status": "in_progress",
+      "category": "工程与交付",
+      "name": "最小技术栈升级：PostgreSQL、SSE、React 编辑器与 Docker",
+      "requirements": [
+        "DATABASE_URL 切换任务与草稿存储及队列，本地默认行为保留",
+        "任务状态 SSE 推送及轮询降级",
+        "独立 React + TypeScript 结构化编辑器，兼容任务和档案凭据",
+        "Docker Compose 部署应用与 PostgreSQL，持久化其余六个 SQLite 存储",
+        "独立迁移命令、回归测试与启动文档"
+      ],
+      "acceptance_criteria": [
+        "默认与 PostgreSQL 模式回归通过，任务断点及草稿重启恢复",
+        "SSE 鉴权、终态与断线降级通过",
+        "编辑、撤销重做、保存、评分、局部重写、差异和版本恢复浏览器验收",
+        "Docker 生成与中文导出、重启持久化通过"
+      ],
+      "release": "当前开发中",
+      "implementation_status": "implemented",
+      "pending_validation": [
+        "按用户要求暂缓 Docker 镜像构建、容器生成及中文导出、容器重启持久化验收"
+      ],
+      "delivery_notes": [
+        "2026-10-19 保存升级前快照，建立 feat/minimal-stack-upgrade 分支。",
+        "PostgreSQL 任务及草稿 JSONB 增量存储、队列原子领取与事务检查点、单应用进程会话锁、独立只读迁移命令；本地默认 JSON / SQLite 保留。",
+        "SSE 鉴权状态快照推送、心跳、终态关闭；网页 fetch 事件流失败后轮询降级，插件接口不变。",
+        "独立 React + TypeScript 编辑器，共享任务 / 档案 / 会话凭据，完整段落编辑、撤销重做、版本保存恢复、评分、差异和局部重写；TypeScript 5.9.3 与 npm 锁文件固定依赖。",
+        "Docker 多阶段构建、非 root 应用、PostgreSQL 健康依赖、中文字体和双数据卷；Compose 配置检查通过，运行验收按用户要求暂缓。",
+        "本地 PostgreSQL 16 集成及全量后端 322 项测试通过，前端与插件 JavaScript 24 项通过，编辑器构建、浏览器流程及 wheel 嵌套资源验证通过；模型使用 stub。",
+        "补验真实应用进程重启后任务、版本与正文恢复；修正正文聚焦时直接撤销的显示同步，320 / 390 / 768 / 1024 / 1440 像素布局通过。仅 run 链接按任务历史恢复指定任务，run+profile 及仅档案凭据访问通过。"
+      ]
     }
   ],
   "recommended_delivery_order": [

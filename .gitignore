@@ -25,3 +25,5 @@ backend/app/static/editor/
 frontend/*.tsbuildinfo
 
 build/
+
+!docs/minimal-stack-upgrade-plan.md

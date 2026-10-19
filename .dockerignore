@@ -1,0 +1,17 @@
+.git
+.env
+.env.*
+!.env.example
+.secrets
+.venv
+.dist
+.pytest_cache
+.playwright-cli
+**/node_modules
+**/__pycache__
+**/*.pyc
+**/*.tsbuildinfo
+output
+noworrycv.egg-info
+backend/app/static/editor
+.DS_Store

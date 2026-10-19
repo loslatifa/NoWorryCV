@@ -21,15 +21,18 @@ def _flow_pdf_font(serif=False):
     """Embed an available Chinese font; retain the portable CID fallback."""
     from reportlab.pdfbase import pdfmetrics
     from reportlab.pdfbase.ttfonts import TTFont, TTFError
-    path = Path("/System/Library/Fonts/Supplemental/Songti.ttc" if serif
-                else "/System/Library/Fonts/STHeiti Light.ttc")
+    candidates = [
+        (Path("/System/Library/Fonts/Supplemental/Songti.ttc" if serif else "/System/Library/Fonts/STHeiti Light.ttc"), 0 if serif else 1),
+        (Path("/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc"), 0),
+    ]
     name = "ResumeSongti" if serif else "ResumeHeiti"
-    if path.is_file():
-        try:
-            pdfmetrics.registerFont(TTFont(name, str(path), subfontIndex=0 if serif else 1))
-            return name
-        except (OSError, TTFError):
-            pass
+    for path, index in candidates:
+        if path.is_file():
+            try:
+                pdfmetrics.registerFont(TTFont(name, str(path), subfontIndex=index))
+                return name
+            except (OSError, TTFError):
+                continue
     return "STSong-Light"
 
 
