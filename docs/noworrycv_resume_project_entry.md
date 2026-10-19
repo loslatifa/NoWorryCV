@@ -10,14 +10,15 @@
 
 ## 技术栈
 
-Python、FastAPI、LangGraph、Pydantic、Structured LLM Output、Prompt Versioning、ATS Heuristics、HTML/CSS/JavaScript
+Python、FastAPI、LangGraph、Pydantic、Structured LLM Output、Prompt Versioning、ATS Heuristics、React、TypeScript、PostgreSQL、SSE、HTML/CSS/JavaScript
 
 ## 简历条目：正式版
 
 - 面向求职场景设计并实现多 Agent 简历定制系统，串联岗位分析、简历抽取、差距识别、内容改写、结果审查与面试准备等关键环节，支持多种简历格式输入与 ATS 友好的 Markdown 输出。
 - 搭建结构化大模型输出与容错机制，结合 Schema 校验、JSON 修复、重试与降级策略提升长链路生成稳定性，并通过 prompt 版本化管理降低持续迭代成本。
 - 建立真实性优先的质量控制闭环，将关键词匹配、事实一致性与文案审查纳入自动优化流程，降低为迎合 JD 过度改写或信息失真的风险。
-- 实现基于 FastAPI 的异步服务与结果页联动能力，支持实时进度展示、岗位知识点提炼和面试准备内容生成，形成从岗位理解到投递准备的一体化产品闭环。
+- 基于 React + TypeScript 实现独立结构化编辑器，支持整段经历编辑、撤销重做、差异对照、局部重写和版本恢复，复用 FastAPI 现有接口与浏览器凭据。
+- 将任务队列、检查点及草稿版本持久化至 PostgreSQL，支持幂等提交与中断恢复；通过 SSE 推送生成进度，断线后降级至状态轮询，本地开发保留 JSON / SQLite 默认存储。
 
 ## 简历条目：一页简历精简版
 
@@ -34,3 +35,7 @@ Python、FastAPI、LangGraph、Pydantic、Structured LLM Output、Prompt Version
 - 若投递方向偏 `AI 应用 / Agent 工程 / Python 后端 / 全栈产品工程`，优先使用“简历条目：正式版”。
 - 若总简历篇幅紧张，可优先使用“一页简历精简版”，保留多 Agent、结构化输出和真实性审查三个重点。
 - 当前文案未写入实验指标；若后续补齐真实线上数据或离线评测结果，可再追加 1 条量化 bullet。
+
+## 技术栈升级验收说明（2026-10-19）
+
+React 编辑器、PostgreSQL 和 SSE 已完成本地集成验收，使用隔离数据库与 stub 模型。Dockerfile 与 Compose 配置已写入并通过配置检查，镜像构建和容器运行验收按用户要求暂缓；在完成运行验收前，不把 Docker 一键部署写成已验证交付。接口数量按更新后的 OpenAPI 统计为 82 个操作（含健康检查），可表述为“80+ 个接口”。

@@ -19,6 +19,7 @@ dependencies = [
   "pypdf>=4.2.0",
   "python-docx>=1.1.2",
   "reportlab>=4.2.0",
+  "psycopg[binary]>=3.2,<4",
 ]
 
 [project.optional-dependencies]
@@ -28,6 +29,9 @@ dev = [
 
 [tool.setuptools.packages.find]
 include = ["backend*"]
+
+[tool.setuptools.package-data]
+"backend.app" = ["static/*", "static/templates/*.png", "static/editor/*", "static/editor/assets/*", "assets/resume_templates/*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["backend/tests"]

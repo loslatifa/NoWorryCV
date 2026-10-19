@@ -1,5 +1,7 @@
 from typing import List, Optional
 
+from backend.app.schemas.preferences import ResumePreferences
+
 from pydantic import BaseModel, Field, model_validator
 
 from backend.app.schemas.candidate import CandidateProfile
@@ -37,10 +39,13 @@ class CandidateArchive(BaseModel):
     updated_at: str
     candidate_profile: CandidateProfile
     fact_cards: List[FactCard]
+    preferences: ResumePreferences = Field(default_factory=ResumePreferences)
+    preferences_revision: int = 1
     access_token: Optional[str] = None
 
 
 class ProfileJobRequest(BaseModel):
+    preferences: Optional[ResumePreferences] = None
     jd_text: str = Field(min_length=1)
     candidate_notes: str = ""
     output_language: str = "auto"

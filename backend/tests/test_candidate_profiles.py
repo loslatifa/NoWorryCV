@@ -66,6 +66,31 @@ def test_saved_archive_is_normalized_persistent_and_exports_without_credentials(
     assert response.json()["fact_cards"][0]["source_excerpt"] == "使用 SQL 分析增长实验"
 
 
+def test_unified_skills_preserve_categories_and_apply_removals():
+    client = TestClient(create_app())
+    material = confirmed_material()
+    material["candidate_profile"]["skills"] = {
+        "hard_skills": ["SQL", "A/B Testing"],
+        "tools": ["Power BI", "CI/CD"],
+        "soft_skills": ["跨团队协作"],
+        "languages": ["英语", "日语"],
+    }
+    retained = ["SQL", "Power BI", "CI/CD", "跨团队协作", "英语", "Python", "sql"]
+    material["fact_cards"] = material["fact_cards"][:1] + [
+        {"id": f"skill-{index}", "category": "skill", "text": text,
+         "source_span": "skills", "confirmed": True}
+        for index, text in enumerate(retained)
+    ]
+    response = client.post("/api/v1/candidate-profiles", json=material)
+    assert response.status_code == 201, response.text
+    assert response.json()["candidate_profile"]["skills"] == {
+        "hard_skills": ["SQL", "Python"],
+        "tools": ["Power BI", "CI/CD"],
+        "soft_skills": ["跨团队协作"],
+        "languages": ["英语"],
+    }
+
+
 @pytest.mark.parametrize("invalid", ["unconfirmed", "no_consent", "empty_fact", "duplicate_id", "blank_label", "no_profile_confirmation"])
 def test_archive_rejects_unconfirmed_or_invalid_material(invalid):
     client = TestClient(create_app())

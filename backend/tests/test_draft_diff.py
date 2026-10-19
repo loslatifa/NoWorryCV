@@ -100,5 +100,6 @@ def test_completed_run_exposes_draft_diff_api() -> None:
         "modified_count",
         "removed_count",
         "ungrounded_count",
+        "version_id",
     }
     assert all(item["original_text"] or item["change_type"] == "added" for item in payload["items"])

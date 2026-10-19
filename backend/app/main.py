@@ -11,12 +11,20 @@ from backend.app.api.v1.routes import router as api_router
 from backend.app.api.v1.profiles import router as profiles_router
 from backend.app.api.v1.history import router as history_router
 from backend.app.api.v1.applications import router as applications_router
+from backend.app.api.v1.quality import router as quality_router
+from backend.app.api.v1.interviews import router as interviews_router
+from backend.app.api.v1.materials import router as materials_router
+from backend.app.services.materials import get_material_store
+from backend.app.api.v1.positions import router as positions_router
+from backend.app.api.v1.templates import router as templates_router
+from backend.app.services.interviews import get_interview_store
 from backend.app.core.config import get_settings
 from backend.app.services.rate_limit import SlidingWindowRateLimiter
 from backend.app.services.runs.store import get_run_store
 from backend.app.services.runs.queue import get_task_queue
 from backend.app.services.runs.worker import start_task_workers
 from backend.app.services.applications import get_application_store
+from backend.app.services.quality import get_quality_store
 
 
 logger = logging.getLogger(__name__)
@@ -29,6 +37,9 @@ async def app_lifespan(_app: FastAPI):
         yield
     finally:
         get_task_queue().stop()
+        close = getattr(get_run_store(), "close", None)
+        if close:
+            close()
 
 
 def create_app() -> FastAPI:
@@ -65,9 +76,14 @@ def create_app() -> FastAPI:
         get_run_store().cleanup_expired()
         get_task_queue().cleanup_expired()
         get_application_store().cleanup_expired()
+        get_quality_store().cleanup_expired()
+        get_interview_store().cleanup_expired()
+        get_material_store().cleanup_expired()
         profile_prefix = "{0}/candidate-profiles".format(settings.api_prefix)
         if request.method == "POST" and (
             request.url.path in limited_paths
+            or request.url.path.endswith("/materials")
+            or ("/interviews" in request.url.path and request.url.path.endswith(("/interviews", "/answers")))
             or request.url.path == profile_prefix
             or (request.url.path.startswith(profile_prefix + "/")
                 and request.url.path.endswith(("/preview", "/jobs", "/applications")))
@@ -102,6 +118,11 @@ def create_app() -> FastAPI:
     app.include_router(profiles_router, prefix=settings.api_prefix)
     app.include_router(history_router, prefix=settings.api_prefix)
     app.include_router(applications_router, prefix=settings.api_prefix)
+    app.include_router(quality_router, prefix=settings.api_prefix)
+    app.include_router(interviews_router, prefix=settings.api_prefix)
+    app.include_router(materials_router, prefix=settings.api_prefix)
+    app.include_router(positions_router, prefix=settings.api_prefix)
+    app.include_router(templates_router, prefix=settings.api_prefix)
     return app
 
 

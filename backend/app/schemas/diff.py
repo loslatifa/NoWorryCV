@@ -27,6 +27,7 @@ class DraftDiffItem(BaseModel):
 
 
 class DraftDiffResponse(BaseModel):
+    version_id: str = ""
     items: List[DraftDiffItem] = Field(default_factory=list)
     added_count: int = 0
     modified_count: int = 0

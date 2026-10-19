@@ -14,15 +14,21 @@ class Settings(BaseSettings):
     llm_provider: str = "stub"
     llm_model: str = ""
     llm_api_key: str = ""
+    deepseek_api_key: str = ""
     llm_base_url: str = "https://api.openai.com/v1"
     llm_timeout_seconds: float = 45.0
     llm_max_retries: int = 2
     llm_response_format: str = "json_schema"
     llm_strict_mode: bool = True
+    database_url: str = Field(default="", repr=False)
     run_store_path: str = str(Path(".dist") / "run_store.json")
     task_queue_path: str = str(Path(".dist") / "task_queue.sqlite3")
     candidate_archive_path: str = str(Path(".dist") / "candidate_archives.sqlite3")
     application_store_path: str = str(Path(".dist") / "applications.sqlite3")
+    quality_store_path: str = str(Path(".dist") / "quality.sqlite3")
+    material_store_path: str = str(Path(".dist") / "materials.sqlite3")
+    interview_store_path: str = str(Path(".dist") / "interviews.sqlite3")
+    position_store_path: str = str(Path(".dist") / "positions.sqlite3")
     task_worker_count: int = 1
     task_max_attempts: int = 3
     anonymous_run_ttl_hours: int = 24

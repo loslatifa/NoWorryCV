@@ -1551,3 +1551,27 @@ textarea {
     grid-template-columns: 1fr;
   }
 }
+
+.quality-funnel { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; margin: 14px 0; }
+.quality-funnel > div { display: flex; flex-direction: column; gap: 6px; padding: 12px 6px; text-align: center; border-radius: 10px; background: #edf4ef; }
+.quality-funnel strong { font-size: 23px; }
+.quality-funnel span { font-size: 12px; color: #536359; }
+.quality-panel table { width: 100%; border-collapse: collapse; font-size: 12px; margin: 12px 0; }
+.quality-panel th, .quality-panel td { text-align: left; padding: 9px 5px; border-bottom: 1px solid #dce5df; overflow-wrap: anywhere; }
+.change-feedback { margin: 14px 0 0; }
+.change-feedback select { max-width: 190px; margin: 8px 6px 8px 0; padding: 8px; }
+#generation-provenance { white-space: pre-wrap; overflow-wrap: anywhere; }
+@media (max-width: 480px) { .quality-funnel { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+
+.preferences-panel { padding: 14px; border: 1px solid var(--border, #ddd); border-radius: 12px; }
+.preferences-panel summary { cursor: pointer; font-weight: 600; }
+.preferences-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-bottom: 12px; }
+@media (max-width: 500px) { .preferences-grid { grid-template-columns: 1fr; } }
+
+.mock-interview-panel { margin-top: 20px; }
+.interview-question { font-weight: 600; line-height: 1.7; white-space: pre-wrap; }
+.interview-feedback { display: grid; gap: 12px; margin: 16px 0; }
+.interview-assessment { border: 1px solid #dedbd2; border-radius: 10px; padding: 12px; }
+.interview-assessment p, .interview-issue p { margin: 6px 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.interview-issue { border-left: 3px solid #b56b26; padding: 10px 14px; background: #fff7ea; border-radius: 6px; }
+#interview-context, #interview-jd-reference, #interview-resume-reference, #interview-facts { overflow-wrap: anywhere; }

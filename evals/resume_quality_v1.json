@@ -1,0 +1,334 @@
+{
+  "version": "v1",
+  "data_policy": "synthetic_only",
+  "cases": [
+    {
+      "id": "campus-data-zh",
+      "language": "zh",
+      "hiring_track": "campus",
+      "input": {
+        "resume_text": "使用 SQL 和 Python 开发数据看板",
+        "jd_text": "校招数据分析师\n岗位职责：使用 SQL 分析数据并开发数据看板。\n要求：SQL、Python，面向应届毕业生。",
+        "output_language": "zh",
+        "processing_mode": "application",
+        "max_iterations": 1,
+        "confirmed_candidate_profile": {
+          "basics": {
+            "name": "候选人甲"
+          },
+          "projects": [
+            {
+              "id": "project-1",
+              "name": "数据看板",
+              "role": "开发者",
+              "bullets": [
+                "使用 SQL 和 Python 开发数据看板"
+              ],
+              "skills_used": [
+                "SQL",
+                "Python"
+              ]
+            }
+          ],
+          "skills": {
+            "hard_skills": [
+              "SQL",
+              "Python"
+            ]
+          },
+          "education": [
+            {
+              "id": "education-1",
+              "school": "示例大学",
+              "degree": "Bachelor",
+              "field_of_study": "Computer Science"
+            }
+          ]
+        },
+        "confirmed_fact_cards": [
+          {
+            "id": "project-fact",
+            "category": "project_bullet",
+            "text": "使用 SQL 和 Python 开发数据看板",
+            "source_span": "projects.project-1.bullets.0",
+            "source_excerpt": "使用 SQL 和 Python 开发数据看板",
+            "confirmed": true
+          },
+          {
+            "id": "skill-0",
+            "category": "skill",
+            "text": "SQL",
+            "confirmed": true
+          },
+          {
+            "id": "skill-1",
+            "category": "skill",
+            "text": "Python",
+            "confirmed": true
+          }
+        ]
+      },
+      "expectations": {
+        "required_skills": [
+          "SQL",
+          "Python"
+        ],
+        "forbidden_claims": [
+          "800%",
+          "Stanford",
+          "斯坦福",
+          "managed 50 engineers",
+          "管理 50 人团队"
+        ],
+        "minimum_score": 35,
+        "minimum_traceability_coverage": 1
+      }
+    },
+    {
+      "id": "intern-backend-zh",
+      "language": "zh",
+      "hiring_track": "intern",
+      "input": {
+        "resume_text": "使用 Python 和 FastAPI 开发并测试接口服务",
+        "jd_text": "后端开发实习生\n职责：开发和测试 Python 接口服务。\n要求：Python、FastAPI。",
+        "output_language": "zh",
+        "processing_mode": "application",
+        "max_iterations": 1,
+        "confirmed_candidate_profile": {
+          "basics": {
+            "name": "候选人乙"
+          },
+          "projects": [
+            {
+              "id": "project-1",
+              "name": "接口服务",
+              "role": "开发者",
+              "bullets": [
+                "使用 Python 和 FastAPI 开发并测试接口服务"
+              ],
+              "skills_used": [
+                "Python",
+                "FastAPI"
+              ]
+            }
+          ],
+          "skills": {
+            "hard_skills": [
+              "Python",
+              "FastAPI"
+            ]
+          },
+          "education": [
+            {
+              "id": "education-1",
+              "school": "示例大学",
+              "degree": "Bachelor",
+              "field_of_study": "Computer Science"
+            }
+          ]
+        },
+        "confirmed_fact_cards": [
+          {
+            "id": "project-fact",
+            "category": "project_bullet",
+            "text": "使用 Python 和 FastAPI 开发并测试接口服务",
+            "source_span": "projects.project-1.bullets.0",
+            "source_excerpt": "使用 Python 和 FastAPI 开发并测试接口服务",
+            "confirmed": true
+          },
+          {
+            "id": "skill-0",
+            "category": "skill",
+            "text": "Python",
+            "confirmed": true
+          },
+          {
+            "id": "skill-1",
+            "category": "skill",
+            "text": "FastAPI",
+            "confirmed": true
+          }
+        ]
+      },
+      "expectations": {
+        "required_skills": [
+          "Python",
+          "FastAPI"
+        ],
+        "forbidden_claims": [
+          "800%",
+          "Stanford",
+          "斯坦福",
+          "managed 50 engineers",
+          "管理 50 人团队"
+        ],
+        "minimum_score": 35,
+        "minimum_traceability_coverage": 1
+      }
+    },
+    {
+      "id": "experienced-data-en",
+      "language": "en",
+      "hiring_track": "experienced",
+      "input": {
+        "resume_text": "Built a reporting service using SQL and Python",
+        "jd_text": "Senior Data Analyst\nResponsibilities: Build SQL reporting workflows.\nRequirements: SQL and Python, experienced candidates.",
+        "output_language": "en",
+        "processing_mode": "application",
+        "max_iterations": 1,
+        "confirmed_candidate_profile": {
+          "basics": {
+            "name": "Candidate C"
+          },
+          "projects": [
+            {
+              "id": "project-1",
+              "name": "Reporting Service",
+              "role": "Developer",
+              "bullets": [
+                "Built a reporting service using SQL and Python"
+              ],
+              "skills_used": [
+                "SQL",
+                "Python"
+              ]
+            }
+          ],
+          "skills": {
+            "hard_skills": [
+              "SQL",
+              "Python"
+            ]
+          },
+          "education": [
+            {
+              "id": "education-1",
+              "school": "Example University",
+              "degree": "Bachelor",
+              "field_of_study": "Computer Science"
+            }
+          ]
+        },
+        "confirmed_fact_cards": [
+          {
+            "id": "project-fact",
+            "category": "project_bullet",
+            "text": "Built a reporting service using SQL and Python",
+            "source_span": "projects.project-1.bullets.0",
+            "source_excerpt": "Built a reporting service using SQL and Python",
+            "confirmed": true
+          },
+          {
+            "id": "skill-0",
+            "category": "skill",
+            "text": "SQL",
+            "confirmed": true
+          },
+          {
+            "id": "skill-1",
+            "category": "skill",
+            "text": "Python",
+            "confirmed": true
+          }
+        ]
+      },
+      "expectations": {
+        "required_skills": [
+          "SQL",
+          "Python"
+        ],
+        "forbidden_claims": [
+          "800%",
+          "Stanford",
+          "斯坦福",
+          "managed 50 engineers",
+          "管理 50 人团队"
+        ],
+        "minimum_score": 35,
+        "minimum_traceability_coverage": 1
+      }
+    },
+    {
+      "id": "campus-backend-en",
+      "language": "en",
+      "hiring_track": "campus",
+      "input": {
+        "resume_text": "Built and tested API endpoints with Python and FastAPI",
+        "jd_text": "Graduate Backend Engineer\nResponsibilities: Build Python API services.\nRequirements: Python and FastAPI, new graduates.",
+        "output_language": "en",
+        "processing_mode": "application",
+        "max_iterations": 1,
+        "confirmed_candidate_profile": {
+          "basics": {
+            "name": "Candidate D"
+          },
+          "projects": [
+            {
+              "id": "project-1",
+              "name": "API Service",
+              "role": "Developer",
+              "bullets": [
+                "Built and tested API endpoints with Python and FastAPI"
+              ],
+              "skills_used": [
+                "Python",
+                "FastAPI"
+              ]
+            }
+          ],
+          "skills": {
+            "hard_skills": [
+              "Python",
+              "FastAPI"
+            ]
+          },
+          "education": [
+            {
+              "id": "education-1",
+              "school": "Example University",
+              "degree": "Bachelor",
+              "field_of_study": "Computer Science"
+            }
+          ]
+        },
+        "confirmed_fact_cards": [
+          {
+            "id": "project-fact",
+            "category": "project_bullet",
+            "text": "Built and tested API endpoints with Python and FastAPI",
+            "source_span": "projects.project-1.bullets.0",
+            "source_excerpt": "Built and tested API endpoints with Python and FastAPI",
+            "confirmed": true
+          },
+          {
+            "id": "skill-0",
+            "category": "skill",
+            "text": "Python",
+            "confirmed": true
+          },
+          {
+            "id": "skill-1",
+            "category": "skill",
+            "text": "FastAPI",
+            "confirmed": true
+          }
+        ]
+      },
+      "expectations": {
+        "required_skills": [
+          "Python",
+          "FastAPI"
+        ],
+        "forbidden_claims": [
+          "800%",
+          "Stanford",
+          "斯坦福",
+          "managed 50 engineers",
+          "管理 50 人团队"
+        ],
+        "minimum_score": 35,
+        "minimum_traceability_coverage": 1
+      }
+    }
+  ]
+}

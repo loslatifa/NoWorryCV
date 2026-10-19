@@ -61,10 +61,9 @@ class DurableTaskQueue:
         finally:
             connection.close()
 
-    def _initialize(self) -> None:
-        with self._connection() as connection:
-            connection.executescript(
-                """
+    @staticmethod
+    def schema_sql() -> str:
+        return """
                 CREATE TABLE IF NOT EXISTS tasks (
                     run_id TEXT PRIMARY KEY,
                     payload_json TEXT NOT NULL,
@@ -97,8 +96,11 @@ class DurableTaskQueue:
                 );
                 CREATE INDEX IF NOT EXISTS idx_stage_run
                     ON stage_executions(run_id, id);
-                """
-            )
+        """
+
+    def _initialize(self) -> None:
+        with self._connection() as connection:
+            connection.executescript(self.schema_sql())
 
     def start(
         self,
@@ -434,6 +436,9 @@ class DurableTaskQueue:
 @lru_cache
 def get_task_queue() -> DurableTaskQueue:
     settings = get_settings()
+    if settings.database_url:
+        from backend.app.services.runs.postgres import PostgresTaskQueue
+        return PostgresTaskQueue(settings.database_url, settings.task_worker_count, settings.task_max_attempts)
     return DurableTaskQueue(
         settings.task_queue_path,
         worker_count=settings.task_worker_count,

@@ -6,7 +6,7 @@
   <p id="status" role="status" aria-live="polite">正在连接基础档案…</p>
   <section><h2>1 · 连接基础档案</h2>
     <label>服务地址<input id="api-base" value="http://127.0.0.1:8000" type="url"></label>
-    <div class="row"><button id="open-app">打开 NoWorryCV</button><button id="connect">读取网页已保存档案</button></div>
+    <div class="row"><button id="open-app">打开 NoWorryCV</button><button id="open-positions">职位投递工作台</button><button id="connect">读取网页已保存档案</button></div>
     <label>选择档案<select id="profiles"><option value="">请先连接档案</option></select></label>
     <label><input id="auto-generate" type="checkbox" checked> 打开助手时，识别到岗位与申请表后自动生成微调简历</label>
     <p class="hint">先在 NoWorryCV 网页上传并确认资料、保存基础档案。插件从同一服务的已打开网页读取连接信息。</p>
@@ -16,10 +16,11 @@
     <p id="job-source" class="hint"></p>
     <label>公司<input id="company" maxlength="120"></label><label>职位<input id="role" maxlength="120"></label>
     <label>岗位要求<textarea id="jd" rows="7" placeholder="识别结果可编辑；也可以粘贴岗位职责和任职要求。"></textarea></label>
+    <details><summary>本次岗位与简历偏好</summary><div id="preferences-fields"></div><p class="hint">沿用档案常用偏好，可手动覆盖。页数为目标，请检查附件。</p></details>
     <button id="generate" class="primary">根据当前档案生成微调简历</button>
   </section>
   <section id="review" hidden><h2>3 · 检查简历与填写内容</h2>
-    <p id="changes"></p><p id="risks" class="warning"></p>
+    <p id="record-preferences" class="hint"></p><p id="changes"></p><p id="risks" class="warning"></p>
     <details open><summary>微调简历</summary><pre id="draft"></pre></details>
     <button id="edit-draft">在 NoWorryCV 中编辑此版本</button>
     <label><input id="expand" type="checkbox"> 准备预览时，自动新增缺少的项目、实习和教育区块</label>

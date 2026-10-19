@@ -1,0 +1,120 @@
+{
+  "evaluation_version": "resume-quality-v1",
+  "report_schema_version": 2,
+  "dataset_version": "v1",
+  "dataset_digest": "d774e562ec2dbf8105456abbacb402781c5f9a47523453a82f8026eb7a9d67e3",
+  "cases": [
+    {
+      "case_id": "campus-data-zh",
+      "passed": false,
+      "metrics": {},
+      "error": {
+        "code": "model_not_found",
+        "stage": "jd_analyst",
+        "http_status": 404,
+        "message": "配置的模型不存在，或当前账号 / 地区无权使用该模型。"
+      },
+      "failures": [
+        "配置的模型不存在，或当前账号 / 地区无权使用该模型。"
+      ],
+      "provenance": {
+        "provider": "openai_compatible",
+        "model": "qwen3-32b",
+        "prompt_version": "v1",
+        "prompt_digest": "17cdfd63fdc5ba1abf2c8d5237650a269e1759b8ea27d617c5d9fb8c7005c6e2",
+        "scoring_version": "jd-match-v1",
+        "scoring_digest": "dd66485637975c6008a98be38ff2b31ea3b18dd2dd07bfbba4311b07fa1dbd33",
+        "pipeline_digest": "fa0fb02c58ea2a6a4c451acb9ce64bce1c49b2c9fe736c21db1b3930d24530a8",
+        "processing_mode": "application",
+        "strict_mode": true,
+        "fingerprint": "97eb5d91dba676255d20744e5fadeebfc21a5c096b2f042a8b1d2166201bf0fc"
+      },
+      "duration_ms": 299
+    },
+    {
+      "case_id": "intern-backend-zh",
+      "passed": false,
+      "metrics": {},
+      "error": {
+        "code": "model_not_found",
+        "stage": "jd_analyst",
+        "http_status": 404,
+        "message": "配置的模型不存在，或当前账号 / 地区无权使用该模型。"
+      },
+      "failures": [
+        "配置的模型不存在，或当前账号 / 地区无权使用该模型。"
+      ],
+      "provenance": {
+        "provider": "openai_compatible",
+        "model": "qwen3-32b",
+        "prompt_version": "v1",
+        "prompt_digest": "17cdfd63fdc5ba1abf2c8d5237650a269e1759b8ea27d617c5d9fb8c7005c6e2",
+        "scoring_version": "jd-match-v1",
+        "scoring_digest": "dd66485637975c6008a98be38ff2b31ea3b18dd2dd07bfbba4311b07fa1dbd33",
+        "pipeline_digest": "fa0fb02c58ea2a6a4c451acb9ce64bce1c49b2c9fe736c21db1b3930d24530a8",
+        "processing_mode": "application",
+        "strict_mode": true,
+        "fingerprint": "97eb5d91dba676255d20744e5fadeebfc21a5c096b2f042a8b1d2166201bf0fc"
+      },
+      "duration_ms": 241
+    },
+    {
+      "case_id": "experienced-data-en",
+      "passed": false,
+      "metrics": {},
+      "error": {
+        "code": "model_not_found",
+        "stage": "jd_analyst",
+        "http_status": 404,
+        "message": "配置的模型不存在，或当前账号 / 地区无权使用该模型。"
+      },
+      "failures": [
+        "配置的模型不存在，或当前账号 / 地区无权使用该模型。"
+      ],
+      "provenance": {
+        "provider": "openai_compatible",
+        "model": "qwen3-32b",
+        "prompt_version": "v1",
+        "prompt_digest": "17cdfd63fdc5ba1abf2c8d5237650a269e1759b8ea27d617c5d9fb8c7005c6e2",
+        "scoring_version": "jd-match-v1",
+        "scoring_digest": "dd66485637975c6008a98be38ff2b31ea3b18dd2dd07bfbba4311b07fa1dbd33",
+        "pipeline_digest": "fa0fb02c58ea2a6a4c451acb9ce64bce1c49b2c9fe736c21db1b3930d24530a8",
+        "processing_mode": "application",
+        "strict_mode": true,
+        "fingerprint": "97eb5d91dba676255d20744e5fadeebfc21a5c096b2f042a8b1d2166201bf0fc"
+      },
+      "duration_ms": 257
+    },
+    {
+      "case_id": "campus-backend-en",
+      "passed": false,
+      "metrics": {},
+      "error": {
+        "code": "model_not_found",
+        "stage": "jd_analyst",
+        "http_status": 404,
+        "message": "配置的模型不存在，或当前账号 / 地区无权使用该模型。"
+      },
+      "failures": [
+        "配置的模型不存在，或当前账号 / 地区无权使用该模型。"
+      ],
+      "provenance": {
+        "provider": "openai_compatible",
+        "model": "qwen3-32b",
+        "prompt_version": "v1",
+        "prompt_digest": "17cdfd63fdc5ba1abf2c8d5237650a269e1759b8ea27d617c5d9fb8c7005c6e2",
+        "scoring_version": "jd-match-v1",
+        "scoring_digest": "dd66485637975c6008a98be38ff2b31ea3b18dd2dd07bfbba4311b07fa1dbd33",
+        "pipeline_digest": "fa0fb02c58ea2a6a4c451acb9ce64bce1c49b2c9fe736c21db1b3930d24530a8",
+        "processing_mode": "application",
+        "strict_mode": true,
+        "fingerprint": "97eb5d91dba676255d20744e5fadeebfc21a5c096b2f042a8b1d2166201bf0fc"
+      },
+      "duration_ms": 256
+    }
+  ],
+  "passed": false,
+  "regressions": [],
+  "started_at": "2026-10-15T02:32:01.039528+00:00",
+  "completed_at": "2026-10-15T02:32:02.092911+00:00"
+}

@@ -13,6 +13,7 @@ class FactCard(BaseModel):
     evidence_level: str = "explicit"
     confidence: float = Field(default=1.0, ge=0.0, le=1.0)
     confirmed: bool = False
+    replaces_fact_ids: List[str] = Field(default_factory=list)
     allowed_operations: List[str] = Field(
         default_factory=lambda: ["rewrite", "reorder", "highlight"]
     )

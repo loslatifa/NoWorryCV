@@ -8,6 +8,10 @@ import httpx
 from backend.app.core.config import Settings, get_settings
 
 
+class LLMOutputTruncatedError(ValueError):
+    """The provider explicitly stopped before completing its response."""
+
+
 class LLMProvider(Protocol):
     name: str
 
@@ -66,7 +70,9 @@ class OpenAICompatibleProvider:
         }
         if metadata.get("max_tokens"):
             payload["max_tokens"] = int(metadata["max_tokens"])
-        if "enable_thinking" in metadata:
+        if urlparse(self.base_url).hostname == "api.deepseek.com" and self.model.strip().lower().startswith("deepseek-"):
+            payload["thinking"] = {"type": "enabled" if metadata.get("enable_thinking", False) else "disabled"}
+        elif "enable_thinking" in metadata:
             payload["enable_thinking"] = bool(metadata["enable_thinking"])
         elif self._requires_explicit_disable_thinking():
             payload["enable_thinking"] = False
@@ -118,6 +124,8 @@ class OpenAICompatibleProvider:
         choices = payload.get("choices") or []
         if not choices:
             raise RuntimeError("No choices returned from provider.")
+        if choices[0].get("finish_reason") == "length":
+            raise LLMOutputTruncatedError("Model response reached the output token limit.")
         message = choices[0].get("message") or {}
         content = message.get("content", "")
         if isinstance(content, str):
@@ -157,10 +165,13 @@ def build_llm_provider(settings: Optional[Settings] = None) -> LLMProvider:
             timeout_seconds=settings.llm_timeout_seconds,
         )
     if provider_name in {"openai", "openai_compatible"}:
-        if not settings.llm_api_key or not settings.llm_model:
+        api_key = settings.llm_api_key
+        if not api_key and urlparse(settings.llm_base_url).hostname == "api.deepseek.com":
+            api_key = settings.deepseek_api_key
+        if not api_key or not settings.llm_model:
             return StubLLMProvider(reason="Missing LLM credentials or model; falling back to stub.")
         return OpenAICompatibleProvider(
-            api_key=settings.llm_api_key,
+            api_key=api_key,
             model=settings.llm_model,
             base_url=settings.llm_base_url,
             timeout_seconds=settings.llm_timeout_seconds,

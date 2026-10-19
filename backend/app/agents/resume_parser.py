@@ -21,7 +21,7 @@ from backend.app.services.scoring.heuristics import canonicalize_skills, extract
 
 class ResumeParserAgent(BaseAgent):
     name = "resume_parser"
-    llm_metadata = {"max_tokens": 1600, "timeout_seconds": 75}
+    llm_metadata = {"max_tokens": 4096, "timeout_seconds": 75}
     GENERIC_TITLE_LINES = {"resume", "cv", "个人简历", "简历"}
     ACTION_HINTS = {
         "负责",
@@ -100,7 +100,7 @@ class ResumeParserAgent(BaseAgent):
             normalized_profile = self._normalize_profile(profile, resume_text, candidate_notes)
             fact_cards = self._build_fact_cards(normalized_profile, resume_text)
             if not self._has_minimum_signal(normalized_profile, fact_cards):
-                raise StructuredLLMError("Resume parser returned insufficient structured signal.")
+                raise StructuredLLMError("Resume parser returned insufficient structured signal.", agent_name=self.name) from ValueError("Insufficient resume signal.")
             return normalized_profile, fact_cards
         except StructuredLLMError as exc:
             try:
@@ -111,7 +111,7 @@ class ResumeParserAgent(BaseAgent):
                 normalized_profile = self._normalize_profile(compact_profile, resume_text, candidate_notes)
                 fact_cards = self._build_fact_cards(normalized_profile, resume_text)
                 if not self._has_minimum_signal(normalized_profile, fact_cards):
-                    raise StructuredLLMError("Resume parser compact mode returned insufficient structured signal.")
+                    raise StructuredLLMError("Resume parser compact mode returned insufficient structured signal.", agent_name=self.name) from ValueError("Insufficient resume signal.")
                 return normalized_profile, fact_cards
             except StructuredLLMError:
                 return self.fallback_on_error(exc, (fallback_profile, fallback_fact_cards))
@@ -164,9 +164,11 @@ class ResumeParserAgent(BaseAgent):
             profile.summary = "\n".join(filter(None, [profile.summary.strip(), candidate_notes.strip()]))
 
         for index, experience in enumerate(profile.work_experiences, start=1):
+            experience.review_paragraph = None
             if not experience.id:
                 experience.id = "exp_{0}".format(index)
         for index, project in enumerate(profile.projects, start=1):
+            project.review_paragraph = None
             if not project.id:
                 project.id = "proj_{0}".format(index)
         for index, education in enumerate(profile.education, start=1):
@@ -290,11 +292,14 @@ class ResumeParserAgent(BaseAgent):
             header_lines, bullets = self._split_block_components(block)
             header = header_lines[0] if header_lines else ""
             company, title = self._split_header(header, header_lines[1:])
+            start_date, end_date = self._extract_period(" ".join(header_lines))
             experiences.append(
                 WorkExperience(
                     id="exp_{0}".format(index),
                     company=company,
                     title=title,
+                    start_date=start_date,
+                    end_date=end_date,
                     bullets=bullets,
                     skills_used=canonicalize_skills(extract_known_skills("\n".join(block))),
                     achievements=[bullet for bullet in bullets if re.search(r"\d", bullet)],
@@ -310,16 +315,34 @@ class ResumeParserAgent(BaseAgent):
             header_lines, bullets = self._split_block_components(block)
             header = header_lines[0] if header_lines else "Project {0}".format(index)
             role = self._infer_project_role(header_lines[1:])
+            start_date, end_date = self._extract_period(" ".join(header_lines))
             projects.append(
                 ProjectExperience(
                     id="proj_{0}".format(index),
                     name=self._clean_project_name(header),
                     role=role,
+                    start_date=start_date,
+                    end_date=end_date,
                     bullets=bullets,
                     skills_used=canonicalize_skills(extract_known_skills("\n".join(block))),
                 )
             )
         return projects
+
+    def _extract_period(self, text: str) -> Tuple[Optional[str], Optional[str]]:
+        date = r"(?:19|20)\d{2}(?:(?:[./-]\d{1,2}){1,2}|年\d{1,2}月(?:\d{1,2}日)?)?"
+        matched = re.search(r"({0})\s*(?:至|到|—|–|~|～|-|\bto\b)\s*({0}|至今|现在|present|current)".format(date), text, re.I)
+        return (matched.group(1), matched.group(2)) if matched else (None, None)
+
+    def _is_period_header(self, text: str) -> bool:
+        start, end = self._extract_period(text)
+        if not start:
+            return False
+        remainder = re.sub(re.escape(start) + r"\s*(?:至|到|—|–|~|～|-|\bto\b)\s*" + re.escape(end), "", text, count=1, flags=re.I)
+        return remainder.strip(" :：|").lower() in {"", "时间", "项目时间", "起止时间", "date", "dates", "period"}
+
+    def _is_role_header(self, text: str) -> bool:
+        return bool(re.match(r"^(?:项目角色|角色|担任角色|岗位|职位|职务|role|position)\s*[:：]\s*\S", text.strip(), re.I))
 
     def _parse_education(self, lines: List[str]) -> List[EducationEntry]:
         entries: List[EducationEntry] = []
@@ -412,7 +435,13 @@ class ResumeParserAgent(BaseAgent):
                         confidence=confidence,
                     )
                 )
-        for skill in profile.skills.hard_skills + profile.skills.tools:
+        seen_skills = set()
+        for skill in (profile.skills.hard_skills + profile.skills.tools
+                      + profile.skills.soft_skills + profile.skills.languages):
+            key = skill.strip().casefold()
+            if not key or key in seen_skills:
+                continue
+            seen_skills.add(key)
             source_excerpt, confidence = self._find_source_evidence(skill, resume_text)
             fact_cards.append(
                 FactCard(
@@ -547,6 +576,9 @@ class ResumeParserAgent(BaseAgent):
                 bullets.append(self._strip_bullet(line))
                 bullet_mode = True
                 continue
+            if not bullet_mode and (self._is_period_header(line) or self._is_role_header(line)):
+                header_lines.append(line.strip())
+                continue
             if not bullet_mode and header_lines and self._looks_like_action_line(line):
                 bullets.append(line.strip())
                 bullet_mode = True
@@ -561,6 +593,8 @@ class ResumeParserAgent(BaseAgent):
         return header_lines, [bullet for bullet in bullets if bullet]
 
     def _should_start_new_block(self, mode: str, current: List[str], line: str, next_line: str) -> bool:
+        if mode in {"experience", "project"} and (self._is_period_header(line) or self._is_role_header(line)) and not any(self._is_bullet(item) for item in current):
+            return False
         if any(self._is_bullet(item) for item in current) and not self._is_bullet(line):
             return True
         if not current:
@@ -636,12 +670,17 @@ class ResumeParserAgent(BaseAgent):
 
     def _infer_project_role(self, detail_lines: List[str]) -> Optional[str]:
         for detail in detail_lines:
+            if self._is_role_header(detail):
+                return re.split(r"[:：]", detail, maxsplit=1)[1].strip()
             if re.search(r"(负责人|owner|role|角色|leader|pm|产品经理|组长|实习生)", detail, flags=re.IGNORECASE):
                 return detail.strip()
         return None
 
     def _clean_project_name(self, header: str) -> str:
         cleaned = re.sub(r"^(project|项目经历|项目)[:：]?\s*", "", header.strip(), flags=re.IGNORECASE)
+        start, end = self._extract_period(cleaned)
+        if start:
+            cleaned = re.sub(re.escape(start) + r"\s*(?:至|到|—|–|~|～|-|\bto\b)\s*" + re.escape(end), "", cleaned, count=1, flags=re.I).strip(" |—–-")
         return cleaned or header.strip()
 
     def _extract_graduation_date(self, text: str) -> Optional[str]:

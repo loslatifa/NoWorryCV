@@ -14,14 +14,17 @@ from backend.app.agents.interview_prep import InterviewPrepAgent
 from backend.app.agents.resume_parser import ResumeParserAgent
 from backend.app.agents.rewrite import ResumeRewriteAgent
 from backend.app.agents.strategy import StrategyAgent
+from backend.app.services.preferences import apply_jd_preferences, apply_strategy_preferences, effective_language
 from backend.app.core.config import get_settings
 from backend.app.schemas.jd import JDProfile, KnowledgeReviewCard
 from backend.app.schemas.prep import JDReviewDocument
 from backend.app.schemas.review import ReviewBundle
 from backend.app.schemas.run_state import TailorRunInput, TailorRunResult, TailorRunState
 from backend.app.schemas.strategy import FinalResumePackage
+from backend.app.schemas.quality import GenerationProvenance
 from backend.app.services.follow_up_questions import build_follow_up_questions
 from backend.app.services.confirmed_profile import align_confirmed_profile
+from backend.app.services.provenance import capture_provenance
 
 
 class RunCancelledError(RuntimeError):
@@ -101,6 +104,7 @@ class ResumeTailorOrchestrator:
         )
 
     def run(self, payload: TailorRunInput, run_id: Optional[str] = None) -> TailorRunResult:
+        payload = payload.model_copy(update={"provenance": capture_provenance(payload.processing_mode)}, deep=True)
         generated_run_id = run_id
         if not generated_run_id:
             field = TailorRunState.model_fields["run_id"]
@@ -110,6 +114,7 @@ class ResumeTailorOrchestrator:
             run_id=generated_run_id,
             input=payload,
             resolved_language=payload.output_language,
+            provenance_history=[payload.provenance],
         )
         final_state = self.graph.invoke(initial_state.model_dump(mode="json"))
         state = TailorRunState.model_validate(final_state)
@@ -140,6 +145,15 @@ class ResumeTailorOrchestrator:
             )
             raw_state = state.model_dump(mode="json")
             next_stage = "analyze_jd"
+
+        runtime_version = capture_provenance(payload.processing_mode)
+        if state.input.provenance is None:
+            state.input.provenance = GenerationProvenance(processing_mode=payload.processing_mode) if checkpoint_state else runtime_version
+        if not state.provenance_history:
+            state.provenance_history = [state.input.provenance]
+        if state.provenance_history[-1].fingerprint != runtime_version.fingerprint:
+            state.provenance_history.append(runtime_version)
+        raw_state = state.model_dump(mode="json")
 
         stage_nodes = {
             "analyze_jd": self._analyze_jd_node,
@@ -240,11 +254,9 @@ class ResumeTailorOrchestrator:
                 state.input.jd_text,
                 force_fallback=self._prefer_fast_mode(state.input),
             )
-        state.jd_profile = jd_profile
-        if state.input.output_language == "auto":
-            state.resolved_language = jd_profile.language or state.resolved_language
-        else:
-            state.resolved_language = state.input.output_language
+        state.detected_jd_profile = jd_profile.model_copy(deep=True)
+        state.jd_profile = apply_jd_preferences(jd_profile, state.input.preferences)
+        state.resolved_language = effective_language(state.input.output_language, state.input.preferences, jd_profile.language)
         state.execution_log.append(
             self.jd_analyst.record(
                 "Parsed JD into structured profile.",
@@ -385,7 +397,9 @@ class ResumeTailorOrchestrator:
             state.jd_profile,
             state.resolved_language,
             force_fallback=self._prefer_fast_mode(state.input),
+            preferences=state.input.preferences,
         )
+        state.rewrite_strategy = apply_strategy_preferences(state.rewrite_strategy, state.input.preferences)
         state.execution_log.append(
             self.strategy_agent.record(
                 "Created initial rewrite strategy.",
@@ -493,6 +507,7 @@ class ResumeTailorOrchestrator:
             latest_review.critic_report,
             force_fallback=self._prefer_fast_mode(state.input),
         )
+        state.rewrite_strategy = apply_strategy_preferences(state.rewrite_strategy, state.input.preferences)
         state.execution_log.append(
             self.strategy_agent.record(
                 "Refined rewrite strategy after review feedback.",
@@ -623,6 +638,10 @@ class ResumeTailorOrchestrator:
             drafts=state.drafts,
             reviews=state.reviews,
             final_package=state.final_package,
+            preferences=state.input.preferences, detected_jd_profile=state.detected_jd_profile,
+            resolved_language=state.resolved_language,
+            provenance=state.input.provenance,
+            provenance_history=state.provenance_history,
         )
 
     def _derive_stop_reason(self, state: TailorRunState) -> str:

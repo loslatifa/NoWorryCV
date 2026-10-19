@@ -90,6 +90,11 @@
           required: Boolean(element.required || element.getAttribute("aria-required") === "true"),
           value: getCurrentValue(element),
           options: extractOptions(element),
+          multiple: Boolean(element.multiple),
+          date_part: element.getAttribute("data-date-part") || "",
+          min: element.getAttribute("min") || "",
+          max: element.getAttribute("max") || "",
+          step: element.getAttribute("step") || "",
         section: findParentSection(element),
         semantic_hints: collectSemanticHints(element, selector).join(" "),
         dom_context: findDomTextContext(element),
@@ -306,9 +311,17 @@
     }
     if (tag === "input") {
       if (["checkbox", "radio", "password"].includes(element.type)) return false;
-      setNativeValue(element, value, window.HTMLInputElement.prototype);
+      const prepared = NoWorryCVFormControls.prepareValue(controlMetadata(element), value);
+      if (prepared.reason) return false;
+      const before = element.value;
+      setNativeValue(element, prepared.value, window.HTMLInputElement.prototype);
+      if (element.value !== prepared.value || !element.validity.valid) {
+        // Browser sanitization or min/max/step rejection must not erase existing data.
+        setNativeValue(element, before, window.HTMLInputElement.prototype);
+        return false;
+      }
       dispatchFormEvents(element);
-      return element.value === value && element.validity.valid;
+      return element.value === prepared.value && element.validity.valid;
     }
     return false;
   }
@@ -334,62 +347,27 @@
   }
 
   function fillSelect(select, value) {
-    const optionValue = findBestOptionValue(select, value);
-    if (optionValue == null) {
+    const option = NoWorryCVFormControls.selectOption(controlMetadata(select), value);
+    if (!option) return false;
+    const before = select.value;
+    setNativeValue(select, String(option.value), window.HTMLSelectElement.prototype);
+    if (select.value !== String(option.value) || !select.validity.valid) {
+      setNativeValue(select, before, window.HTMLSelectElement.prototype);
       return false;
     }
-    setNativeValue(select, optionValue, window.HTMLSelectElement.prototype);
     dispatchFormEvents(select);
-    return true;
+    return select.value === String(option.value) && select.validity.valid;
   }
 
-  function findBestOptionValue(select, targetValue) {
-    const target = normalize(targetValue);
-    const options = Array.from(select.options || []);
-    if (!target || !options.length) {
-      return null;
-    }
-
-    const exact = options.find((option) => {
-      return normalize(option.value) === target || normalize(option.textContent) === target;
-    });
-    if (exact) {
-      return exact.value;
-    }
-
-    const includes = options.find((option) => {
-      const value = normalize(option.value);
-      const text = normalize(option.textContent);
-      return Boolean(value && (target.includes(value) || value.includes(target)))
-        || Boolean(text && (target.includes(text) || text.includes(target)));
-    });
-    if (includes) {
-      return includes.value;
-    }
-
-    const degreeAlias = matchDegreeAlias(options, target);
-    if (degreeAlias) {
-      return degreeAlias.value;
-    }
-
-    return null;
-  }
-
-  function matchDegreeAlias(options, target) {
-    const aliases = [
-      { needles: ["master", "msc", "硕士"], optionHints: ["master", "msc", "硕士"] },
-      { needles: ["bachelor", "本科", "学士"], optionHints: ["bachelor", "本科", "学士"] },
-      { needles: ["phd", "doctor", "博士"], optionHints: ["phd", "doctor", "博士"] }
-    ];
-
-    const alias = aliases.find((item) => item.needles.some((needle) => target.includes(needle)));
-    if (!alias) {
-      return null;
-    }
-    return options.find((option) => {
-      const optionText = normalize(`${option.value} ${option.textContent}`);
-      return alias.optionHints.some((hint) => optionText.includes(hint));
-    })?.value || null;
+  function controlMetadata(element) {
+    return {
+      type: getFieldType(element), tag: element.tagName.toLowerCase(),
+      label: findLabel(element), name: element.name || "", id: element.id || "",
+      field_role: element.getAttribute("data-field-role") || "",
+      date_part: element.getAttribute("data-date-part") || "",
+      min: element.getAttribute("min") || "", max: element.getAttribute("max") || "",
+      multiple: Boolean(element.multiple), options: extractOptions(element)
+    };
   }
 
   function setNativeValue(element, value, prototype) {
@@ -907,7 +885,8 @@
     }
     return Array.from(element.options || []).map((option) => ({
       value: option.value,
-      text: cleanupLabelText(option.textContent || "")
+      text: cleanupLabelText(option.textContent || ""),
+      disabled: Boolean(option.disabled || option.parentElement?.tagName === "OPTGROUP" && option.parentElement.disabled)
     }));
   }
 

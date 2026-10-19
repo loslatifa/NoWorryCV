@@ -1,4 +1,6 @@
-from typing import List
+from typing import List, Optional
+from backend.app.schemas.preferences import ResumePreferences
+from backend.app.services.preferences import FAMILY_FOCUS, apply_strategy_preferences
 
 from backend.app.agents.base import BaseAgent
 from backend.app.agents.base import _NO_FALLBACK
@@ -23,8 +25,9 @@ class StrategyAgent(BaseAgent):
         jd_profile: JDProfile,
         language: str,
         force_fallback: bool = False,
+        preferences: Optional[ResumePreferences] = None,
     ) -> RewriteStrategy:
-        fallback = self._run_fallback(candidate_profile, gap_analysis, fact_cards, jd_profile, language)
+        fallback = self._run_fallback(candidate_profile, gap_analysis, fact_cards, jd_profile, language, preferences)
         fallback_result = self.maybe_use_fallback(fallback, force_fallback=force_fallback)
         if fallback_result is not _NO_FALLBACK:
             return fallback_result
@@ -37,6 +40,7 @@ class StrategyAgent(BaseAgent):
                     fact_cards,
                     jd_profile,
                     language,
+                    preferences=preferences,
                 ),
                 response_model=RewriteStrategy,
             )
@@ -53,7 +57,7 @@ class StrategyAgent(BaseAgent):
                         fact_cards,
                         jd_profile,
                         language,
-                        compact_mode=True,
+                        compact_mode=True, preferences=preferences,
                     ),
                     response_model=RewriteStrategy,
                 )
@@ -71,9 +75,11 @@ class StrategyAgent(BaseAgent):
         fact_cards: List[FactCard],
         jd_profile: JDProfile,
         language: str,
+        preferences: Optional[ResumePreferences] = None,
     ) -> RewriteStrategy:
+        preferences = preferences or ResumePreferences()
         priorities = unique_preserve_order(
-            jd_profile.must_have_skills
+            FAMILY_FOCUS.get(preferences.job_family, []) + jd_profile.must_have_skills
             + jd_profile.domain_signals
             + gap_analysis.recommended_focus
             + gap_analysis.strengths
@@ -84,7 +90,7 @@ class StrategyAgent(BaseAgent):
         is_campus_like = hiring_track in {"campus", "intern"}
         has_projects = bool(candidate_profile.projects)
         has_education = bool(candidate_profile.education)
-        return RewriteStrategy(
+        strategy = RewriteStrategy(
             target_resume_style="campus_ats_clean" if is_campus_like else "experienced_ats_clean",
             audience_hint=hiring_track,
             section_priority=self._section_priority_for_track(hiring_track),
@@ -106,6 +112,8 @@ class StrategyAgent(BaseAgent):
             summary_style="potential_and_evidence" if is_campus_like else "impact_and_scope",
             revision_notes=self._revision_notes_for_track(hiring_track, has_projects, has_education),
         )
+
+        return apply_strategy_preferences(strategy, preferences)
 
     def refine(
         self,
@@ -140,7 +148,8 @@ class StrategyAgent(BaseAgent):
             max_bullets = min(5, max_bullets + 1)
             max_skills = min(16, max_skills + 2)
             include_projects = True
-        return RewriteStrategy(
+        refined = RewriteStrategy(
+            preferences=strategy.preferences,
             target_resume_style=strategy.target_resume_style,
             audience_hint=strategy.audience_hint,
             section_priority=strategy.section_priority,
@@ -157,6 +166,7 @@ class StrategyAgent(BaseAgent):
             summary_style=strategy.summary_style,
             revision_notes=revision_notes,
         )
+        return apply_strategy_preferences(refined, strategy.preferences)
 
     def _normalize_strategy(
         self,
@@ -202,7 +212,7 @@ class StrategyAgent(BaseAgent):
             strategy.max_skills = fallback.max_skills
         if strategy.audience_hint not in {"campus", "experienced", "intern", "unknown", "general"}:
             strategy.audience_hint = fallback.audience_hint
-        return strategy
+        return apply_strategy_preferences(strategy, fallback.preferences)
 
     def _build_llm_context(
         self,
@@ -212,6 +222,7 @@ class StrategyAgent(BaseAgent):
         jd_profile: JDProfile,
         language: str,
         compact_mode: bool = False,
+        preferences: Optional[ResumePreferences] = None,
     ) -> dict:
         relevant_fact_cards = self._select_relevant_fact_cards(
             fact_cards,
@@ -219,6 +230,8 @@ class StrategyAgent(BaseAgent):
             limit=6 if compact_mode else 10,
         )
         return {
+            "preferences": (preferences or ResumePreferences()).model_dump(mode="json"),
+            "preference_rules": "用户显式选择优先于自动识别；目标岗位族及资历仅调整真实事实的表达，不得补造候选人经历。",
             "compact_mode": compact_mode,
             "language": language,
             "jd_profile": {

@@ -1,6 +1,7 @@
 from typing import List, Optional
 
 from pydantic import BaseModel, Field
+from pydantic.json_schema import SkipJsonSchema
 
 
 class CandidateBasics(BaseModel):
@@ -22,14 +23,18 @@ class WorkExperience(BaseModel):
     skills_used: List[str] = Field(default_factory=list)
     achievements: List[str] = Field(default_factory=list)
     raw_block: Optional[str] = None
+    review_paragraph: SkipJsonSchema[Optional[str]] = None
 
 
 class ProjectExperience(BaseModel):
     id: str
     name: str
     role: Optional[str] = None
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
     bullets: List[str] = Field(default_factory=list)
     skills_used: List[str] = Field(default_factory=list)
+    review_paragraph: SkipJsonSchema[Optional[str]] = None
 
 
 class EducationEntry(BaseModel):

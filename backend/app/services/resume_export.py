@@ -1,14 +1,39 @@
 import html
 import re
+from functools import lru_cache
 from io import BytesIO
-from typing import Dict, Iterable, List
+from pathlib import Path
+from typing import Dict, Iterable, List, Optional
 
+from backend.app.schemas.preferences import ResumePreferences
+from backend.app.services.preferences import paper_size
+from backend.app.services.template_catalog import heading_background, template_style
 from backend.app.schemas.candidate import CandidateProfile
 from backend.app.schemas.strategy import ResumeDraft, ResumeSectionItem
 
 
 DOCX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 PDF_MEDIA_TYPE = "application/pdf"
+
+
+@lru_cache(maxsize=4)
+def _flow_pdf_font(serif=False):
+    """Embed an available Chinese font; retain the portable CID fallback."""
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont, TTFError
+    candidates = [
+        (Path("/System/Library/Fonts/Supplemental/Songti.ttc" if serif else "/System/Library/Fonts/STHeiti Light.ttc"), 0 if serif else 1),
+        (Path("/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc"), 0),
+    ]
+    name = "ResumeSongti" if serif else "ResumeHeiti"
+    for path, index in candidates:
+        if path.is_file():
+            try:
+                pdfmetrics.registerFont(TTFont(name, str(path), subfontIndex=index))
+                return name
+            except (OSError, TTFError):
+                continue
+    return "STSong-Light"
 
 
 def sanitize_filename(value: str, fallback: str = "tailored-resume") -> str:
@@ -41,19 +66,25 @@ def draft_to_plain_text(draft: ResumeDraft, candidate: CandidateProfile) -> str:
     return "\n".join(lines).strip()
 
 
-def build_docx(draft: ResumeDraft, candidate: CandidateProfile) -> bytes:
+def build_docx(draft: ResumeDraft, candidate: CandidateProfile, preferences: Optional[ResumePreferences] = None) -> bytes:
     from docx import Document
     from docx.enum.section import WD_SECTION
     from docx.enum.style import WD_STYLE_TYPE
     from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.oxml import OxmlElement
     from docx.oxml.ns import qn
-    from docx.shared import Inches, Pt, RGBColor
+    from docx.shared import Inches, Mm, Pt, RGBColor
 
+    preferences = preferences or ResumePreferences()
+    compact = preferences.template == "ats_compact"
+    layout = template_style(preferences.template)
     document = Document()
     section = document.sections[0]
     section.start_type = WD_SECTION.NEW_PAGE
     section.page_width = Inches(8.5)
     section.page_height = Inches(11)
+    if paper_size(preferences) == "A4":
+        section.page_width, section.page_height = Mm(210), Mm(297)
     section.top_margin = Inches(0.55)
     section.bottom_margin = Inches(0.55)
     section.left_margin = Inches(0.62)
@@ -63,12 +94,12 @@ def build_docx(draft: ResumeDraft, candidate: CandidateProfile) -> bytes:
     normal = styles["Normal"]
     docx_font_name = "Heiti SC"
     normal.font.name = docx_font_name
-    normal.font.size = Pt(10.25)
+    normal.font.size = Pt(10 if compact else 10.25)
     normal.font.color.rgb = RGBColor(0, 0, 0)
     normal._element.rPr.rFonts.set(qn("w:ascii"), docx_font_name)
     normal._element.rPr.rFonts.set(qn("w:hAnsi"), docx_font_name)
     normal._element.rPr.rFonts.set(qn("w:eastAsia"), docx_font_name)
-    normal.paragraph_format.space_after = Pt(2)
+    normal.paragraph_format.space_after = Pt(1 if compact else 2)
     normal.paragraph_format.line_spacing = 1.0
 
     title_style = styles["Title"]
@@ -100,7 +131,7 @@ def build_docx(draft: ResumeDraft, candidate: CandidateProfile) -> bytes:
     section_style._element.rPr.rFonts.set(qn("w:ascii"), docx_font_name)
     section_style._element.rPr.rFonts.set(qn("w:hAnsi"), docx_font_name)
     section_style._element.rPr.rFonts.set(qn("w:eastAsia"), docx_font_name)
-    section_style.paragraph_format.space_before = Pt(6)
+    section_style.paragraph_format.space_before = Pt(4 if compact else 6)
     section_style.paragraph_format.space_after = Pt(2)
     section_style.paragraph_format.keep_with_next = True
 
@@ -112,32 +143,57 @@ def build_docx(draft: ResumeDraft, candidate: CandidateProfile) -> bytes:
     bullet_style._element.rPr.rFonts.set(qn("w:hAnsi"), docx_font_name)
     bullet_style._element.rPr.rFonts.set(qn("w:eastAsia"), docx_font_name)
 
+    if layout["adaptation"] == "flow":
+        section.left_margin = section.right_margin = Pt(layout["margin_x"])
+        section.top_margin = section.bottom_margin = Pt(layout["margin_y"])
+        for style in (normal, title_style, section_style, bullet_style):
+            style.font.name = layout["font"]
+            for script in ("ascii", "hAnsi", "eastAsia"):
+                style._element.get_or_add_rPr().rFonts.set(qn("w:" + script), layout["font"])
+        normal.font.size = bullet_style.font.size = Pt(layout["body_size"])
+        normal.paragraph_format.line_spacing = 1.15
+        bullet_style.paragraph_format.line_spacing = 1.15
+        title_style.font.size = Pt(layout["title_size"])
+        title_style.paragraph_format.space_after = Pt(4)
+        section_style.font.size = Pt(layout["heading_size"])
+        section_style.font.color.rgb = RGBColor.from_string(layout["accent"])
+        section_style.paragraph_format.space_before = Pt(layout["section_gap"])
+        section_style.paragraph_format.space_after = Pt(4)
+        if layout["heading_bar"]:
+            shading = OxmlElement("w:shd")
+            shading.set(qn("w:fill"), heading_background(layout))
+            section_style._element.get_or_add_pPr().append(shading)
+
     title = draft.headline.strip() or (candidate.basics.name or "").strip() or "Resume"
     title_paragraph = document.add_paragraph(style="Title")
-    title_paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
+    title_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER if layout["title_align"] == "center" else WD_ALIGN_PARAGRAPH.LEFT
     title_paragraph.add_run(title)
     contact = _contact_line(candidate)
     if contact:
         contact_paragraph = document.add_paragraph(contact)
+        contact_paragraph.alignment = title_paragraph.alignment
         contact_paragraph.paragraph_format.space_after = Pt(4)
         for run in contact_paragraph.runs:
             run.font.size = Pt(9.25)
 
-    labels = _labels(draft)
-    if draft.summary.strip():
-        _add_docx_heading(document, labels["summary"])
-        document.add_paragraph(draft.summary.strip())
+    labels = _labels(draft, preferences.language)
     skills = _clean_items(draft.skills_section)
-    if skills:
-        _add_docx_heading(document, labels["skills"])
-        document.add_paragraph(", ".join(skills))
-    _add_docx_sections(document, labels["experience"], draft.experience_section)
-    _add_docx_sections(document, labels["projects"], draft.project_section)
     education = _clean_items(draft.education_section)
-    if education:
-        _add_docx_heading(document, labels["education"])
-        for item in education:
-            _add_docx_bullet(document, item)
+    for part in layout["section_order"]:
+        if part == "summary" and draft.summary.strip():
+            _add_docx_heading(document, labels[part])
+            document.add_paragraph(draft.summary.strip())
+        elif part == "skills" and skills:
+            _add_docx_heading(document, labels[part])
+            document.add_paragraph(", ".join(skills))
+        elif part == "experience":
+            _add_docx_sections(document, labels[part], draft.experience_section)
+        elif part == "projects":
+            _add_docx_sections(document, labels[part], draft.project_section)
+        elif part == "education" and education:
+            _add_docx_heading(document, labels[part])
+            for item in education:
+                _add_docx_bullet(document, item)
 
     properties = document.core_properties
     properties.title = title
@@ -148,30 +204,36 @@ def build_docx(draft: ResumeDraft, candidate: CandidateProfile) -> bytes:
     return output.getvalue()
 
 
-def build_pdf(draft: ResumeDraft, candidate: CandidateProfile) -> bytes:
-    from reportlab.lib.enums import TA_LEFT
-    from reportlab.lib.pagesizes import letter
+def build_pdf(draft: ResumeDraft, candidate: CandidateProfile, preferences: Optional[ResumePreferences] = None) -> bytes:
+    from reportlab.lib.enums import TA_CENTER, TA_LEFT
+    from reportlab.lib.pagesizes import A4, letter
     from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
     from reportlab.lib.units import inch
     from reportlab.pdfbase import pdfmetrics
     from reportlab.pdfbase.cidfonts import UnicodeCIDFont
     from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
 
+    preferences = preferences or ResumePreferences()
+    compact = preferences.template == "ats_compact"
+    layout = template_style(preferences.template)
+    imported = layout["adaptation"] == "flow"
     font_name = "STSong-Light"
     try:
         pdfmetrics.getFont(font_name)
     except KeyError:
         pdfmetrics.registerFont(UnicodeCIDFont(font_name))
+    if imported:
+        font_name = _flow_pdf_font(layout["font"] in {"楷体", "宋体", "仿宋"})
 
     output = BytesIO()
     title = draft.headline.strip() or (candidate.basics.name or "").strip() or "Resume"
     document = SimpleDocTemplate(
         output,
-        pagesize=letter,
-        rightMargin=0.62 * inch,
-        leftMargin=0.62 * inch,
-        topMargin=0.52 * inch,
-        bottomMargin=0.52 * inch,
+        pagesize=A4 if paper_size(preferences) == "A4" else letter,
+        rightMargin=layout["margin_x"] if imported else 0.62 * inch,
+        leftMargin=layout["margin_x"] if imported else 0.62 * inch,
+        topMargin=layout["margin_y"] if imported else 0.52 * inch,
+        bottomMargin=layout["margin_y"] if imported else 0.52 * inch,
         title=title,
         author="NoWorryCV",
         subject="ATS friendly tailored resume",
@@ -188,7 +250,7 @@ def build_pdf(draft: ResumeDraft, candidate: CandidateProfile) -> bytes:
             leading=18,
             textColor="#000000",
             alignment=TA_LEFT,
-            spaceAfter=2,
+            spaceAfter=1 if compact else 2,
         ),
         "contact": ParagraphStyle(
             "ResumeContact",
@@ -206,8 +268,8 @@ def build_pdf(draft: ResumeDraft, candidate: CandidateProfile) -> bytes:
             fontSize=11.5,
             leading=13,
             textColor="#000000",
-            spaceBefore=5,
-            spaceAfter=2,
+            spaceBefore=3 if compact else 5,
+            spaceAfter=1 if compact else 2,
             keepWithNext=True,
         ),
         "item": ParagraphStyle(
@@ -215,7 +277,7 @@ def build_pdf(draft: ResumeDraft, candidate: CandidateProfile) -> bytes:
             parent=sample["Normal"],
             fontName=font_name,
             fontSize=10.25,
-            leading=12.2,
+            leading=11.5 if compact else 12.2,
             textColor="#000000",
             spaceAfter=1,
             keepWithNext=True,
@@ -225,16 +287,16 @@ def build_pdf(draft: ResumeDraft, candidate: CandidateProfile) -> bytes:
             parent=sample["Normal"],
             fontName=font_name,
             fontSize=10.25,
-            leading=12.2,
+            leading=11.5 if compact else 12.2,
             textColor="#000000",
-            spaceAfter=2,
+            spaceAfter=1 if compact else 2,
         ),
         "bullet": ParagraphStyle(
             "ResumeBullet",
             parent=sample["Normal"],
             fontName=font_name,
             fontSize=10,
-            leading=12,
+            leading=11.5 if compact else 12,
             textColor="#000000",
             leftIndent=10,
             firstLineIndent=-10,
@@ -242,25 +304,49 @@ def build_pdf(draft: ResumeDraft, candidate: CandidateProfile) -> bytes:
         ),
     }
 
+    if imported:
+        styles["title"].fontSize = layout["title_size"]
+        styles["title"].leading = layout["title_size"] * 1.2
+        styles["title"].alignment = TA_CENTER if layout["title_align"] == "center" else TA_LEFT
+        styles["title"].spaceAfter = 4
+        styles["heading"].fontSize = layout["heading_size"]
+        styles["heading"].leading = layout["heading_size"] * 1.2
+        styles["heading"].textColor = "#" + layout["accent"]
+        styles["heading"].spaceBefore = layout["section_gap"]
+        styles["heading"].spaceAfter = 5
+        if layout["heading_bar"]:
+            styles["heading"].backColor = "#" + heading_background(layout)
+            styles["heading"].borderPadding = 3
+        for key in ("body", "bullet", "item"):
+            styles[key].fontSize = layout["body_size"]
+            styles[key].leading = layout["body_size"] * 1.2
+            styles[key].wordWrap = "CJK"
+        styles["title"].wordWrap = "CJK"
+
+    styles["header_contact"] = ParagraphStyle("ResumeHeaderContact", parent=styles["contact"], alignment=styles["title"].alignment)
+
     story = [Paragraph(_escape(title), styles["title"])]
     contact = _contact_line(candidate)
     if contact:
-        story.append(Paragraph(_escape(contact), styles["contact"]))
-    labels = _labels(draft)
-    if draft.summary.strip():
-        _add_pdf_heading(story, labels["summary"], styles)
-        story.append(Paragraph(_escape(draft.summary.strip()), styles["body"]))
+        story.append(Paragraph(_escape(contact), styles["header_contact"]))
+    labels = _labels(draft, preferences.language)
     skills = _clean_items(draft.skills_section)
-    if skills:
-        _add_pdf_heading(story, labels["skills"], styles)
-        story.append(Paragraph(_escape(", ".join(skills)), styles["body"]))
-    _add_pdf_sections(story, labels["experience"], draft.experience_section, styles)
-    _add_pdf_sections(story, labels["projects"], draft.project_section, styles)
     education = _clean_items(draft.education_section)
-    if education:
-        _add_pdf_heading(story, labels["education"], styles)
-        for item in education:
-            story.append(Paragraph("- {0}".format(_escape(item)), styles["bullet"]))
+    for part in layout["section_order"]:
+        if part == "summary" and draft.summary.strip():
+            _add_pdf_heading(story, labels[part], styles)
+            story.append(Paragraph(_escape(draft.summary.strip()), styles["body"]))
+        elif part == "skills" and skills:
+            _add_pdf_heading(story, labels[part], styles)
+            story.append(Paragraph(_escape(", ".join(skills)), styles["body"]))
+        elif part == "experience":
+            _add_pdf_sections(story, labels[part], draft.experience_section, styles)
+        elif part == "projects":
+            _add_pdf_sections(story, labels[part], draft.project_section, styles)
+        elif part == "education" and education:
+            _add_pdf_heading(story, labels[part], styles)
+            for item in education:
+                story.append(Paragraph("- {0}".format(_escape(item)), styles["bullet"]))
     story.append(Spacer(1, 1))
     document.build(story)
     return output.getvalue()
@@ -272,9 +358,9 @@ def pdf_page_count(pdf_bytes: bytes) -> int:
     return len(PdfReader(BytesIO(pdf_bytes)).pages)
 
 
-def _labels(draft: ResumeDraft) -> Dict[str, str]:
+def _labels(draft: ResumeDraft, language: str = "auto") -> Dict[str, str]:
     text = " ".join([draft.headline, draft.summary] + list(draft.skills_section))
-    zh = any("\u4e00" <= character <= "\u9fff" for character in text)
+    zh = language == "zh" or (language == "auto" and any("\u4e00" <= character <= "\u9fff" for character in text))
     if zh:
         return {
             "summary": "个人摘要",
@@ -321,7 +407,15 @@ def _append_plain_sections(
 
 
 def _add_docx_heading(document, text: str) -> None:
-    document.add_paragraph(text, style="Resume Section")
+    from copy import deepcopy
+    from docx.oxml.ns import qn
+
+    paragraph = document.add_paragraph(text, style="Resume Section")
+    # Some Word viewers omit paragraph shading inherited from custom styles.
+    properties = document.styles["Resume Section"].element.pPr
+    shading = properties.find(qn("w:shd")) if properties is not None else None
+    if shading is not None:
+        paragraph._p.get_or_add_pPr().append(deepcopy(shading))
 
 
 def _add_docx_bullet(document, text: str) -> None:

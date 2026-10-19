@@ -1,0 +1,41 @@
+services:
+  db:
+    image: postgres:16-bookworm
+    environment:
+      POSTGRES_USER: noworrycv
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-noworrycv_local}
+      POSTGRES_DB: noworrycv
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U noworrycv -d noworrycv"]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+    restart: unless-stopped
+  app:
+    build: .
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATABASE_URL: postgresql://noworrycv:${POSTGRES_PASSWORD:-noworrycv_local}@db:5432/noworrycv
+      TASK_WORKER_COUNT: ${TASK_WORKER_COUNT:-1}
+      CANDIDATE_ARCHIVE_PATH: .dist/candidate_archives.sqlite3
+      APPLICATION_STORE_PATH: .dist/applications.sqlite3
+      QUALITY_STORE_PATH: .dist/quality.sqlite3
+      MATERIAL_STORE_PATH: .dist/materials.sqlite3
+      INTERVIEW_STORE_PATH: .dist/interviews.sqlite3
+      POSITION_STORE_PATH: .dist/positions.sqlite3
+    depends_on:
+      db:
+        condition: service_healthy
+        restart: true
+    ports:
+      - "127.0.0.1:${APP_PORT:-8000}:8000"
+    volumes:
+      - app_data:/app/.dist
+    restart: unless-stopped
+volumes:
+  postgres_data:
+  app_data:

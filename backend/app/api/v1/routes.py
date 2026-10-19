@@ -6,9 +6,10 @@ from pathlib import Path
 from typing import Optional
 from urllib.parse import quote
 
-from fastapi import APIRouter, File, Form, Header, HTTPException, UploadFile
-from fastapi.responses import Response
+from fastapi import Request, APIRouter, File, Form, Header, HTTPException, UploadFile
+from fastapi.responses import Response, StreamingResponse
 
+from backend.app.services.preferences import export_preferences, target_pages
 from backend.app.agents.orchestrator import ResumeTailorOrchestrator
 from backend.app.agents.ats import ATSScoringAgent
 from backend.app.agents.compliance import TruthfulnessComplianceAgent
@@ -36,7 +37,12 @@ from backend.app.services.draft_editing import (
     normalize_manual_draft,
 )
 from backend.app.services.draft_diff import build_draft_diff
+from backend.app.services.provenance import capture_provenance
+from backend.app.services.quality import record_event, saved_version_id
+from backend.app.schemas.preferences import PREFERENCE_OPTIONS, ResumePreferences
 from backend.app.services.llm.structured import StructuredLLMError
+from backend.app.services.llm.diagnostics import safe_failure
+from backend.app.services.llm.provider import get_llm_provider
 from backend.app.services.parsers.file_parser import extract_text_from_file
 from backend.app.services.runs.store import get_run_store
 from backend.app.services.runs.queue import get_task_queue
@@ -97,6 +103,13 @@ async def parse_resume_upload(
         gap_analysis=gap_analysis,
         follow_up_questions=follow_up_questions,
     )
+
+
+@router.get("/resume-preferences")
+def preference_options():
+    from backend.app.services.template_catalog import public_templates, import_issues
+    return {"defaults": ResumePreferences().model_dump(), "options": PREFERENCE_OPTIONS,
+            "templates": public_templates(), "template_issues": import_issues()}
 
 
 @router.post("/jd/analyze", response_model=JDProfile)
@@ -193,10 +206,11 @@ def _start_tailor_job(
     candidate_archive_revision: int = 0,
 ) -> TailorRunJobStatus:
     store = get_run_store()
-    job = store.create("任务已创建，等待开始。")
+    payload = payload.model_copy(update={"provenance": capture_provenance(payload.processing_mode)}, deep=True)
+    job = store.create("任务已创建，等待开始。", provenance=payload.provenance)
     normalized_key = (idempotency_key or "").strip()
     if not normalized_key:
-        payload_fingerprint = hashlib.sha256(payload.model_dump_json().encode("utf-8")).hexdigest()
+        payload_fingerprint = hashlib.sha256(json.dumps(payload.model_dump(mode="json", exclude={"provenance"}), sort_keys=True).encode("utf-8")).hexdigest()
         normalized_key = "auto:{0}:{1}".format(payload_fingerprint, int(time.time() // 60))
     queued_job = store.update(
         job.run_id,
@@ -242,11 +256,13 @@ def get_draft_diff(
     job = _get_authorized_run(run_id, x_run_token)
     if job.result is None:
         raise HTTPException(status_code=404, detail="Completed run not found.")
-    return build_draft_diff(
+    response = build_draft_diff(
         job.result.candidate_profile,
         job.result.fact_cards,
         payload.draft,
     )
+    response.version_id = saved_version_id(job.result, payload.draft)
+    return response
 
 
 @router.post("/tailor-runs/{run_id}/score", response_model=JDMatchScoreResponse)
@@ -293,7 +309,10 @@ def preview_resume_export(
     job = _get_authorized_run(run_id, x_run_token)
     if job.result is None:
         raise HTTPException(status_code=404, detail="Completed run not found.")
-    pdf_bytes = build_pdf(payload.draft, job.result.candidate_profile)
+    preferences = export_preferences(job.result.preferences, job.result.resolved_language)
+    if payload.template is not None:
+        preferences = preferences.model_copy(update={"template": payload.template})
+    pdf_bytes = build_pdf(payload.draft, job.result.candidate_profile, preferences)
     page_count = pdf_page_count(pdf_bytes)
     return Response(
         content=pdf_bytes,
@@ -302,7 +321,9 @@ def preview_resume_export(
             "Cache-Control": "no-store",
             "Content-Disposition": "inline; filename=resume-preview.pdf",
             "X-Page-Count": str(page_count),
-            "X-Overflow": "true" if page_count > 1 else "false",
+            "X-Overflow": "true" if page_count > target_pages(job.result.preferences) else "false",
+            "X-Target-Pages": job.result.preferences.page_count,
+            "X-Resume-Template": preferences.template,
         },
     )
 
@@ -318,22 +339,28 @@ def export_resume(
     if job.result is None:
         raise HTTPException(status_code=404, detail="Completed run not found.")
     normalized_format = export_format.lower()
+    preferences = export_preferences(job.result.preferences, job.result.resolved_language)
+    if payload.template is not None:
+        preferences = preferences.model_copy(update={"template": payload.template})
     if normalized_format == "docx":
-        content = build_docx(payload.draft, job.result.candidate_profile)
+        content = build_docx(payload.draft, job.result.candidate_profile, preferences)
         media_type = DOCX_MEDIA_TYPE
     elif normalized_format == "pdf":
-        content = build_pdf(payload.draft, job.result.candidate_profile)
+        content = build_pdf(payload.draft, job.result.candidate_profile, preferences)
         media_type = PDF_MEDIA_TYPE
     else:
         raise HTTPException(status_code=400, detail="Export format must be docx or pdf.")
 
     filename = "{0}.{1}".format(sanitize_filename(payload.filename), normalized_format)
     encoded_filename = quote(filename, safe="")
+    version_id = saved_version_id(job.result, payload.draft)
+    record_event(job, "export", version_id)
     return Response(
         content=content,
         media_type=media_type,
         headers={
             "Cache-Control": "no-store",
+            "X-Resume-Template": preferences.template,
             "Content-Disposition": (
                 "attachment; filename=tailored-resume.{0}; filename*=UTF-8''{1}".format(
                     normalized_format,
@@ -448,6 +475,19 @@ async def _extract_uploaded_resume(resume_file: UploadFile) -> str:
     return resume_text
 
 
+@router.get("/tailor-runs/{run_id}/events")
+def get_tailor_run_events(request: Request, run_id: str, x_run_token: Optional[str] = Header(None)):
+    from backend.app.services.runs.events import status_events
+    _get_authorized_run(run_id, x_run_token)
+
+    def read_status():
+        job = get_run_store().get_authorized(run_id, x_run_token or "")
+        return _enrich_queue_metadata(job) if job else None
+
+    return StreamingResponse(status_events(request, read_status), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache, no-store", "X-Accel-Buffering": "no"})
+
+
 @router.get("/tailor-runs/{run_id}/status", response_model=TailorRunJobStatus)
 def get_tailor_run_status(
     run_id: str,
@@ -501,7 +541,7 @@ def get_privacy_summary() -> dict:
         "max_upload_bytes": settings.max_upload_bytes,
         "supported_file_types": sorted(SUPPORTED_RESUME_SUFFIXES),
         "saved_profile_retention": "用户明确同意保存的基础档案保留至主动删除；历史任务仍按匿名任务期限清理。",
-        "usage": "简历与 JD 仅用于解析、生成、审查、编辑和导出本次求职材料。",
+        "usage": "简历与 JD 用于解析、生成、审查、编辑和导出本次求职材料；本地记录版本反馈及接受、拒绝、保存编辑、导出行为用于质量分析，反馈不收集自由文本并随任务删除或过期清理。",
     }
 
 
@@ -523,10 +563,34 @@ def _build_upload_payload(
 
 
 def _llm_required_error(exc: Exception) -> HTTPException:
-    logger.warning("LLM request failed: %s", exc)
+    diagnostic = safe_failure(exc)
+    code = diagnostic["code"]
+    if code == "generation_failed" and not get_llm_provider().is_available:
+        code = "provider_unavailable"
+    messages = {
+        "provider_unavailable": "未配置可用的模型服务，请检查模型名称和对应密钥，修改配置后重启后端。",
+        "authentication_failed": "模型密钥未通过验证，请检查对应服务商的 API key，修改后重启后端。",
+        "access_denied": "模型服务拒绝访问，请检查账号的模型权限和服务地区。",
+        "quota_exceeded": "模型服务额度或余额不足，请补充额度后重试。",
+        "model_not_found": "配置的模型不存在或未获授权，请核对模型名称和账号权限。",
+        "endpoint_not_found": "模型接口地址或模型名称无效，请检查模型配置。",
+        "timeout": "模型请求超时，请稍后重试；若持续出现，请检查网络和模型服务状态。",
+        "connection_error": "无法连接模型服务，请检查网络或代理设置后重试。",
+        "invalid_output": "模型返回内容不完整或格式不符合要求，请重新解析；若反复出现，请检查模型的 JSON 输出配置。",
+        "output_truncated": "模型返回内容达到长度限制，自动重试后仍未完整生成；请精简重复内容后重试。",
+        "invalid_request": "模型服务不接受当前请求参数，请检查模型和输出格式配置。",
+        "rate_limited": "模型服务限流，请稍后重试。",
+        "provider_error": "模型服务暂时异常，请稍后重试。",
+    }
+    stage = {"resume_parser": "简历解析", "jd_analyst": "岗位分析", "gap_analysis": "缺口分析"}.get(diagnostic["stage"])
+    detail = messages.get(code, "模型服务暂时不可用，请检查服务配置或稍后重试。")
+    if stage:
+        detail = f"{stage}未完成：{detail}"
+    logger.warning("LLM request failed: stage=%s code=%s upstream_status=%s error_type=%s", diagnostic["stage"], code, diagnostic["http_status"], diagnostic["error_type"])
     return HTTPException(
         status_code=503,
-        detail="模型服务暂时不可用，请检查服务配置或稍后重试。",
+        detail=detail,
+        headers={"X-Error-Code": code},
     )
 
 

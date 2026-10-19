@@ -3,6 +3,7 @@ from typing import Optional
 from fastapi import APIRouter, Header, HTTPException
 from fastapi.responses import Response
 
+from backend.app.services.preferences import export_preferences, merge_preferences
 from backend.app.api.v1.profiles import _get_archive
 from backend.app.api.v1.routes import _start_tailor_job
 from backend.app.schemas.application import (
@@ -16,6 +17,7 @@ from backend.app.services.profiles import archive_resume_text
 from backend.app.services.resume_export import build_docx, build_pdf, DOCX_MEDIA_TYPE, PDF_MEDIA_TYPE
 from backend.app.services.runs.store import get_run_store
 from backend.app.services.runs.queue import get_task_queue
+from backend.app.services.quality import record_event
 
 router = APIRouter(prefix="/candidate-profiles/{profile_id}/applications", tags=["applications"])
 
@@ -52,6 +54,9 @@ def _refresh(profile_id, application_id):
         result = job.result
         draft = result.final_package.draft.model_copy(deep=True)
         current.draft = draft
+        current.preferences = result.preferences.model_copy(deep=True)
+        current.resolved_language = result.resolved_language
+        current.provenance = result.provenance.model_copy(deep=True)
         current.draft_digest = draft_digest(draft)
         current.candidate_profile = result.candidate_profile.model_copy(deep=True)
         current.fact_cards = [fact.model_copy(deep=True) for fact in result.fact_cards]
@@ -59,6 +64,16 @@ def _refresh(profile_id, application_id):
         current.risk_notes = list(result.final_package.risk_notes) + warnings
         active_version = next((version for version in result.draft_versions
                                if version.id == result.active_version_id), None)
+        current.version_id = active_version.id if active_version else ""
+        current.jd_profile = result.jd_profile.model_copy(deep=True)
+        prepared_version = next((version for version in reversed(result.draft_versions) if version.source == "generated"), None)
+        if active_version and prepared_version and active_version.id == prepared_version.id:
+            current.jd_review = result.final_package.jd_review_doc.markdown if result.final_package.jd_review_doc else ""
+            current.interview_prep = result.final_package.interview_prep_doc.markdown if result.final_package.interview_prep_doc else ""
+        else:
+            current.jd_review = current.interview_prep = ""
+        if active_version:
+            current.provenance = active_version.provenance.model_copy(deep=True)
         report = active_version.compliance_report if active_version else (
             result.reviews[-1].compliance_report if result.reviews else None)
         if report:
@@ -77,9 +92,11 @@ def create_application(profile_id: str, payload: ApplicationCreate,
     archive = _get_archive(profile_id, x_profile_token)
     if archive.revision != payload.expected_revision:
         raise HTTPException(409, "基础档案已更新，请重新载入。")
+    payload = payload.model_copy(update={"preferences": merge_preferences(archive.preferences, payload.preferences)}, deep=True)
     # Application mode retains real JD analysis, rewriting and review; skips study documents.
     jd_for_analysis = "\n".join(part for part in (payload.target_role.strip(), payload.jd_text.strip()) if part)
     job = _start_tailor_job(TailorRunInput(
+        preferences=payload.preferences,
         resume_text=archive_resume_text(archive), jd_text=jd_for_analysis,
         confirmed_candidate_profile=archive.candidate_profile, confirmed_fact_cards=archive.fact_cards,
         max_iterations=1, processing_mode="application", output_language=payload.output_language,
@@ -117,7 +134,11 @@ def confirm_application(profile_id: str, application_id: str, payload: Applicati
             current.status = "confirmed"
             current.status_message = "已确认简历并保存，可以填写投递页面。"
     try:
-        return get_application_store().update(profile_id, application_id, confirm)
+        record = get_application_store().update(profile_id, application_id, confirm)
+        job = get_run_store().get(record.run_id)
+        if job:
+            record_event(job, "confirmed", event_id=record.id + ":confirmed")
+        return record
     except ApplicationConflict as exc:
         raise HTTPException(409, str(exc)) from exc
 
@@ -150,11 +171,14 @@ def export_application_resume(profile_id: str, application_id: str, export_forma
     if not record.confirmed_at or record.draft is None:
         raise HTTPException(409, "请先确认简历。")
     if export_format == "pdf":
-        content, media_type = build_pdf(record.draft, record.candidate_profile), PDF_MEDIA_TYPE
+        content, media_type = build_pdf(record.draft, record.candidate_profile, export_preferences(record.preferences, record.resolved_language)), PDF_MEDIA_TYPE
     elif export_format == "docx":
-        content, media_type = build_docx(record.draft, record.candidate_profile), DOCX_MEDIA_TYPE
+        content, media_type = build_docx(record.draft, record.candidate_profile, export_preferences(record.preferences, record.resolved_language)), DOCX_MEDIA_TYPE
     else:
         raise HTTPException(400, "仅支持 PDF 或 DOCX。")
+    job = get_run_store().get(record.run_id)
+    if job:
+        record_event(job, "export")
     return Response(content, media_type=media_type, headers={
         "Cache-Control": "no-store",
         "Content-Disposition": 'attachment; filename="tailored-resume.{0}"'.format(export_format),

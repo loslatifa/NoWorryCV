@@ -116,7 +116,7 @@ class ApplicationStore:
         record = ApplicationRecord(
             id=str(uuid4()), profile_id=profile_id, profile_revision=revision, run_id=run_id,
             created_at=now, updated_at=now, page_url=str(payload.page_url),
-            expires_at=expires_at,
+            expires_at=expires_at, preferences=payload.preferences or {},
             job_url=str(payload.job_url or payload.page_url), jd_text=payload.jd_text.strip(),
             target_company=payload.target_company.strip(), target_role=payload.target_role.strip(),
         )

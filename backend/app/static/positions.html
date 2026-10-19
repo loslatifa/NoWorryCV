@@ -1,0 +1,289 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>职位投递工作台 · NoWorryCV</title>
+    <link rel="icon" type="image/svg+xml" href="/app/favicon.svg">
+    <link rel="stylesheet" href="/app/styles.css">
+    <link rel="stylesheet" href="/app/positions.css">
+    <link rel="stylesheet" href="/app/workspace.css?v=20261019-paragraphs">
+  </head>
+  <body>
+    <div class="workspace-layout">
+      <aside class="workspace-sidebar">
+        <a class="workspace-brand" href="/app/">
+          <span class="brand-symbol" aria-hidden="true">N<span>·</span>
+          </span>
+          <span>NoWorryCV<small>求职，心里有底</small>
+          </span>
+        </a>
+        <p class="nav-caption">我的工作空间</p>
+        <nav aria-label="工作台导航">
+          <a href="/app/#create" class="workspace-nav-item">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M12 5v14M5 12h14"></path>
+            </svg>
+            <span>简历定制</span>
+          </a>
+          <a href="/app/#result" class="workspace-nav-item">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M7 3h7l4 4v14H6V3h1Zm7 0v5h5M9 12h6M9 16h6"></path>
+            </svg>
+            <span>简历结果</span>
+          </a>
+          <a href="/app/#history" class="workspace-nav-item">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M3 11a9 9 0 1 1 2 7M3 4v7h7M12 7v5l3 2"></path>
+            </svg>
+            <span>任务历史</span>
+          </a>
+          <a class="workspace-nav-item active" href="/app/positions.html" aria-current="page">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect x="3" y="7" width="18" height="14" rx="2"></rect>
+              <path d="M8 7V3h8v4M3 12h18m-11 0v3h4v-3"></path>
+            </svg>
+            <span>职位投递</span>
+          </a>
+          <a href="/app/#quality" class="workspace-nav-item">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M4 20V10m7 10V4m7 16v-7M2 20h20"></path>
+            </svg>
+            <span>反馈与质量</span>
+          </a>
+        </nav>
+        <div class="sidebar-note">
+          <span class="local-indicator"></span>
+          <strong>本地工作空间</strong>
+          <p>从已确认的经历出发，<br>准备每一次投递。</p>
+        </div>
+      </aside>
+      <div class="workspace-main">
+        <header class="workspace-topbar">
+          <p>工作空间 <span>/</span>
+            <strong id="workspace-breadcrumb">职位投递</strong>
+          </p>
+          <a href="/app/#create" class="topbar-link">返回简历工作台 <span aria-hidden="true">↗</span>
+          </a>
+        </header>
+        <main class="workspace-content" id="workspace-main">
+          <section class="positions-shell">
+            <header class="positions-header">
+              <div>
+                <h1>职位投递工作台</h1>
+                <p>围绕每个职位保存材料、记录进度，安排下一步。</p>
+              </div>
+            </header>
+            <label class="field">
+              <span>基础档案</span>
+              <select id="board-profile">
+                <option value="">请选择已保存的基础档案</option>
+              </select>
+            </label>
+            <p id="board-status" role="status" aria-live="polite" class="review-help">正在读取本浏览器的基础档案…</p>
+            <section class="panel board-filters">
+              <div id="board-counts" class="archive-actions"></div>
+              <div class="preferences-grid">
+                <label class="field">
+                  <span>搜索公司、职位、JD 或行动</span>
+                  <input id="board-search" type="search" maxlength="200">
+                </label>
+                <label class="field">
+                  <span>投递阶段</span>
+                  <select id="board-stage">
+                    <option value="all">全部阶段</option>
+                    <option value="pending">待投递</option>
+                    <option value="applied">已投递</option>
+                    <option value="assessment">笔试</option>
+                    <option value="interview">面试</option>
+                    <option value="offer">Offer</option>
+                    <option value="closed">关闭</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span>提醒</span>
+                  <select id="board-reminder">
+                    <option value="all">全部提醒</option>
+                    <option value="due">已到期</option>
+                    <option value="upcoming">待提醒</option>
+                    <option value="none">无提醒</option>
+                  </select>
+                </label>
+              </div>
+              <button id="board-refresh" type="button" class="secondary-button">刷新职位和材料</button>
+              <p class="review-help">提醒在本页面显示；没有后台推送。关闭职位暂停到期提示，保留材料和原提醒时间。</p>
+            </section>
+            <div class="positions-layout">
+              <aside>
+                <details class="panel">
+                  <summary>新增职位</summary>
+                  <form id="board-create" class="tailor-form">
+                    <label class="field">
+                      <span>公司</span>
+                      <input id="new-company" required maxlength="120">
+                    </label>
+                    <label class="field">
+                      <span>职位</span>
+                      <input id="new-role" required maxlength="120">
+                    </label>
+                    <label class="field">
+                      <span>岗位描述 JD</span>
+                      <textarea id="new-jd" rows="5" required maxlength="30000"></textarea>
+                    </label>
+                    <label class="field">
+                      <span>岗位链接（选填）</span>
+                      <input id="new-url" type="url" maxlength="2048">
+                    </label>
+                    <label class="fact-confirm">
+                      <input id="new-consent" type="checkbox" required>
+                      <span>同意长期保存此职位，保留至主动删除。</span>
+                    </label>
+                    <button type="submit" class="submit-button">保存职位</button>
+                  </form>
+                </details>
+                <section class="panel">
+                  <h2>职位列表</h2>
+                  <div id="board-list">
+                    <p class="review-help">选择基础档案后，查看或新增职位。</p>
+                  </div>
+                </section>
+              </aside>
+              <section id="board-detail" class="panel hidden">
+                <h2 id="position-heading"></h2>
+                <p id="position-current" class="review-help"></p>
+                <form id="position-edit" class="tailor-form">
+                  <div class="preferences-grid">
+                    <label class="field">
+                      <span>公司名称</span>
+                      <input id="edit-company" required maxlength="120">
+                    </label>
+                    <label class="field">
+                      <span>职位名称</span>
+                      <input id="edit-role" required maxlength="120">
+                    </label>
+                    <label class="field">
+                      <span>当前阶段</span>
+                      <select id="edit-stage">
+                        <option value="pending">待投递</option>
+                        <option value="applied">已投递</option>
+                        <option value="assessment">笔试</option>
+                        <option value="interview">面试</option>
+                        <option value="offer">Offer</option>
+                        <option value="closed">关闭</option>
+                      </select>
+                    </label>
+                    <label class="field">
+                      <span>提醒时间（本地时区）</span>
+                      <input id="edit-remind" type="datetime-local">
+                    </label>
+                  </div>
+                  <label class="field">
+                    <span>当前岗位 JD</span>
+                    <textarea id="edit-jd" rows="5" required maxlength="30000"></textarea>
+                  </label>
+                  <label class="field">
+                    <span>职位链接</span>
+                    <input id="edit-url" type="url" maxlength="2048">
+                  </label>
+                  <label class="field">
+                    <span>下一步行动</span>
+                    <textarea id="edit-action" rows="2" maxlength="1000" placeholder="例如：完成笔试，或准备下一轮面试"></textarea>
+                  </label>
+                  <label class="field">
+                    <span>本次进展备注（加入时间线）</span>
+                    <input id="edit-note" maxlength="1000">
+                  </label>
+                  <button type="submit" class="secondary-button">保存进度与行动</button>
+                </form>
+                <p class="review-help">“已投递”由你在确认完成招聘页面提交后记录。插件的“已填写”不会自动改变投递阶段。</p>
+                <div class="archive-actions">
+                  <button id="position-generate" class="secondary-button">为此职位生成简历</button>
+                  <button id="position-delete" class="danger-button">删除职位及关联快照</button>
+                </div>
+                <div id="position-runs"></div>
+                <details class="board-section">
+                  <summary>关联简历版本</summary>
+                  <p class="review-help">来源材料的 JD 可能与此职位不同，请核对。关联后独立长期保存；关闭职位或源任务到期不会删除这些快照。</p>
+                  <label class="field">
+                    <span>材料来源</span>
+                    <select id="material-source">
+                      <option value="">请选择</option>
+                    </select>
+                  </label>
+                  <label class="field">
+                    <span>来源简历版本</span>
+                    <select id="material-version"></select>
+                  </label>
+                  <details>
+                    <summary>核对来源岗位与简历</summary>
+                    <pre id="material-preview" class="markdown-output"></pre>
+                  </details>
+                  <label class="fact-confirm">
+                    <input id="material-consent" type="checkbox">
+                    <span>我已核对所选版本，同意长期关联并设为当前投递版本。</span>
+                  </label>
+                  <button id="material-link" class="secondary-button">长期关联所选简历</button>
+                  <div id="position-resumes"></div>
+                </details>
+                <details class="board-section">
+                  <summary>面试准备与复习报告</summary>
+                  <p class="review-help">准备文档随关联简历保存。已提交的面试回答需另行同意长期保存；只可关联使用同一简历版本的练习。</p>
+                  <label class="field">
+                    <span>可保存的面试练习</span>
+                    <select id="practice-source">
+                      <option value="">暂无可保存练习</option>
+                    </select>
+                  </label>
+                  <label class="fact-confirm">
+                    <input id="practice-consent" type="checkbox">
+                    <span>同意将所选练习的回答和反馈长期保存到此职位。</span>
+                  </label>
+                  <button id="practice-link" class="secondary-button">保存面试复习报告</button>
+                  <div id="position-interviews"></div>
+                </details>
+                <details class="board-section">
+                  <summary>岗位求职材料包</summary>
+                  <p class="review-help">在源简历任务中生成并逐份核对材料，再选择同一版本长期关联。原任务到期不改变保存的快照；后续编辑需重新关联。</p>
+                  <label class="field">
+                    <span>可保存的求职材料包</span>
+                    <select id="pack-source">
+                      <option value="">暂无材料包</option>
+                    </select>
+                  </label>
+                  <details>
+                    <summary>核对材料内容与来源 JD</summary>
+                    <pre id="pack-preview" class="markdown-output"></pre>
+                  </details>
+                  <label class="fact-confirm">
+                    <input id="pack-consent" type="checkbox">
+                    <span>我已核对所选材料包，同意将全部内容长期保存到此职位。</span>
+                  </label>
+                  <button id="pack-link" class="secondary-button">长期保存求职材料包</button>
+                  <div id="position-material-packs"></div>
+                </details>
+                <details class="board-section">
+                  <summary>进展时间线</summary>
+                  <div id="position-timeline"></div>
+                </details>
+              </section>
+              <section id="board-empty" class="panel board-empty">
+                <span class="empty-state-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                    <rect x="3" y="7" width="18" height="14" rx="2"></rect>
+                    <path d="M8 7V3h8v4M3 12h18"></path>
+                  </svg>
+                </span>
+                <p class="eyebrow">每个机会，都值得认真准备</p>
+                <h2>投递进度，清楚一点。</h2>
+                <p>选择左侧的职位，查看简历、准备材料和下一步行动。<br>还没有职位？先连接基础档案，再添加第一个目标岗位。</p>
+                <a class="secondary-button" href="/app/#create">准备基础档案 <span aria-hidden="true">↗</span>
+                </a>
+              </section>
+            </div>
+          </section>
+        </main>
+      </div>
+    </div>
+    <script src="/app/positions.js"></script>
+  </body>
+</html>
