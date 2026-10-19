@@ -18,4 +18,10 @@ noworrycv.egg-info/
 docs/*
 !docs/noworrycv_resume_project_entry.md
 
+frontend/node_modules/
+backend/app/static/editor/
+.playwright-cli/
+
+frontend/*.tsbuildinfo
+
 build/

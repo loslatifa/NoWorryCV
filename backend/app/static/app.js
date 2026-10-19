@@ -1624,6 +1624,9 @@ function applyReviewedVersion(version, versions) {
 
 function initializeDraftEditor(result) {
   currentRunId = result.run_id;
+  const editorLink = document.getElementById("open-react-editor");
+  const linkedProfile = new URLSearchParams(location.search).get("profile");
+  editorLink.href = `/app/editor/?run=${encodeURIComponent(currentRunId)}${linkedProfile ? `&profile=${encodeURIComponent(linkedProfile)}` : ""}`;
   exportTemplateId = result.preferences?.template || "ats_standard";
   preferencesReady.then(() => {
     if (currentRunId === result.run_id) renderResumeTemplateSummary("export-template-summary", exportTemplateId);
@@ -2414,6 +2417,19 @@ async function resumeSavedRun() {
       sessionStorage.setItem("noworrycv-active-run", JSON.stringify({
         runId: linkedRun, token: credential.token, expiresAt: job.expires_at,
       }));
+      history.replaceState(null, "", window.location.pathname);
+    } else if (linkedRun) {
+      const remembered = JSON.parse(localStorage.getItem("noworrycv-run-history") || "[]");
+      const active = JSON.parse(sessionStorage.getItem("noworrycv-active-run") || "null");
+      const credential = Array.isArray(remembered) ? remembered.find(item => item.id === linkedRun) : null;
+      const token = credential?.token || (active?.runId === linkedRun ? active.token : "");
+      if (!token) throw new Error("请在保存该任务凭据的浏览器中打开这份简历。");
+      const response = await fetch(`/api/v1/tailor-runs/${encodeURIComponent(linkedRun)}/status`, {
+        headers: { "X-Run-Token": token },
+      });
+      if (!response.ok) throw new Error("此生成任务已过期或不可访问。");
+      const job = await response.json();
+      sessionStorage.setItem("noworrycv-active-run", JSON.stringify({runId: linkedRun, token, expiresAt: job.expires_at}));
       history.replaceState(null, "", window.location.pathname);
     }
     saved = JSON.parse(sessionStorage.getItem("noworrycv-active-run") || "null");

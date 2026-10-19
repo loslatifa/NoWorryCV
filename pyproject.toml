@@ -30,5 +30,8 @@ dev = [
 [tool.setuptools.packages.find]
 include = ["backend*"]
 
+[tool.setuptools.package-data]
+"backend.app" = ["static/*", "static/templates/*.png", "static/editor/*", "static/editor/assets/*", "assets/resume_templates/*.json"]
+
 [tool.pytest.ini_options]
 testpaths = ["backend/tests"]
