@@ -17,3 +17,5 @@ __pycache__/
 noworrycv.egg-info/
 docs/*
 !docs/noworrycv_resume_project_entry.md
+
+build/

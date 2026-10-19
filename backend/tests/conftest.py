@@ -1,4 +1,10 @@
+import os
+
 import pytest
+
+# main.app is imported during collection, before function fixtures.
+# Never let a developer DATABASE_URL connect to live data at that point.
+os.environ["DATABASE_URL"] = ""
 
 from backend.app.core.config import reset_settings_cache
 from backend.app.services.llm.provider import reset_llm_provider_cache
@@ -9,34 +15,29 @@ from backend.app.services.runs.queue import reset_task_queue_cache
 from backend.app.services.profiles import reset_candidate_archive_store_cache
 from backend.app.services.applications import get_application_store
 from backend.app.services.quality import get_quality_store
-from backend.app.services.positions import get_position_store
-from backend.app.services.materials import get_material_store
-from backend.app.services.materials import get_material_store
 from backend.app.services.interviews import get_interview_store
+from backend.app.services.materials import get_material_store
+from backend.app.services.positions import get_position_store
 
 
 @pytest.fixture(autouse=True)
 def reset_runtime_caches(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("DATABASE_URL", "")
     monkeypatch.setenv("LLM_PROVIDER", "stub")
     monkeypatch.setenv("LLM_STRICT_MODE", "false")
     monkeypatch.setenv("RUN_STORE_PATH", str(tmp_path / "run_store.json"))
     monkeypatch.setenv("TASK_QUEUE_PATH", str(tmp_path / "task_queue.sqlite3"))
     monkeypatch.setenv("CANDIDATE_ARCHIVE_PATH", str(tmp_path / "candidate_archives.sqlite3"))
     monkeypatch.setenv("APPLICATION_STORE_PATH", str(tmp_path / "applications.sqlite3"))
-    monkeypatch.setenv("QUALITY_STORE_PATH", str(tmp_path / "quality.sqlite3"))
     monkeypatch.setenv("POSITION_STORE_PATH", str(tmp_path / "positions.sqlite3"))
     monkeypatch.setenv("MATERIAL_STORE_PATH", str(tmp_path / "materials.sqlite3"))
-    monkeypatch.setenv("MATERIAL_STORE_PATH", str(tmp_path / "materials.sqlite3"))
     monkeypatch.setenv("INTERVIEW_STORE_PATH", str(tmp_path / "interviews.sqlite3"))
+    monkeypatch.setenv("QUALITY_STORE_PATH", str(tmp_path / "quality.sqlite3"))
+    # Empty environment values override .env; deleting them would load real local keys.
     monkeypatch.setenv("QWEN_API_KEY", "")
     monkeypatch.setenv("DASHSCOPE_API_KEY", "")
     monkeypatch.setenv("LLM_API_KEY", "")
     monkeypatch.setenv("DEEPSEEK_API_KEY", "")
-    get_quality_store.cache_clear()
-    get_position_store.cache_clear()
-    get_material_store.cache_clear()
-    get_material_store.cache_clear()
-    get_interview_store.cache_clear()
     reset_settings_cache()
     reset_llm_provider_cache()
     reset_structured_llm_service_cache()
@@ -45,12 +46,11 @@ def reset_runtime_caches(monkeypatch, tmp_path) -> None:
     reset_task_queue_cache()
     reset_candidate_archive_store_cache()
     get_application_store.cache_clear()
+    get_quality_store.cache_clear()
+    get_interview_store.cache_clear()
+    get_material_store.cache_clear()
+    get_position_store.cache_clear()
     yield
-    get_quality_store.cache_clear()
-    get_position_store.cache_clear()
-    get_material_store.cache_clear()
-    get_material_store.cache_clear()
-    get_interview_store.cache_clear()
     reset_settings_cache()
     reset_llm_provider_cache()
     reset_structured_llm_service_cache()
@@ -59,3 +59,7 @@ def reset_runtime_caches(monkeypatch, tmp_path) -> None:
     reset_task_queue_cache()
     reset_candidate_archive_store_cache()
     get_application_store.cache_clear()
+    get_quality_store.cache_clear()
+    get_interview_store.cache_clear()
+    get_material_store.cache_clear()
+    get_position_store.cache_clear()
