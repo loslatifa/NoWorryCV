@@ -12,7 +12,7 @@ sys.path.insert(0, str(ROOT))
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--provider", choices=["stub", "configured"], default="stub")
-    parser.add_argument("--suite", choices=["resume"], default="resume")
+    parser.add_argument("--suite", choices=["resume", "preparation"], default="resume")
     parser.add_argument("--model", help="仅本次真实评测使用的模型名称，不修改 .env")
     parser.add_argument("--dataset", type=Path)
     parser.add_argument("--output", type=Path, default=ROOT / ".dist/evaluations/latest.json")

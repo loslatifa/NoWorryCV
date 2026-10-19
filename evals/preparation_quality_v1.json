@@ -1,0 +1,396 @@
+{
+  "version": "v1",
+  "data_policy": "synthetic_only",
+  "contexts": {
+    "zh": {
+      "language": "zh",
+      "company": "示例公司",
+      "jd_text": "数据分析实习生\n使用 SQL 分析增长实验，使用 Python 整理报表。Kafka 为加分项。",
+      "jd_profile": {
+        "job_title": "数据分析实习生",
+        "hiring_track": "intern",
+        "language": "zh",
+        "must_have_skills": [
+          "SQL",
+          "Python"
+        ],
+        "nice_to_have_skills": [
+          "Kafka"
+        ],
+        "keywords": [
+          "SQL",
+          "Python"
+        ],
+        "responsibilities": [
+          "分析增长实验"
+        ]
+      },
+      "candidate_profile": {
+        "basics": {
+          "language": "zh"
+        },
+        "projects": [
+          {
+            "id": "p1",
+            "name": "增长实验",
+            "bullets": [
+              "参与 SQL 分析增长实验，转化率提升20%。",
+              "协助核对实验记录并整理分析结论。"
+            ]
+          },
+          {
+            "id": "p2",
+            "name": "报表处理",
+            "bullets": [
+              "使用 Python 整理报表，周转时间缩短40%。"
+            ]
+          }
+        ],
+        "skills": {
+          "hard_skills": [
+            "SQL",
+            "Python"
+          ]
+        }
+      },
+      "draft": {
+        "headline": "数据分析实习生",
+        "skills_section": [
+          "SQL",
+          "Python"
+        ],
+        "project_section": [
+          {
+            "heading": "增长实验",
+            "bullets": [
+              "参与 SQL 分析增长实验，转化率提升20%。",
+              "协助核对实验记录并整理分析结论。"
+            ]
+          },
+          {
+            "heading": "报表处理",
+            "bullets": [
+              "使用 Python 整理报表，周转时间缩短40%。"
+            ]
+          },
+          {
+            "heading": "未确认草稿",
+            "bullets": [
+              "独立主导 Kafka 集群，收入提升90%。"
+            ]
+          }
+        ],
+        "traceability": [
+          {
+            "draft_span": "project_section.1.bullets.1",
+            "fact_ids": [
+              "f1"
+            ]
+          },
+          {
+            "draft_span": "project_section.1.bullets.2",
+            "fact_ids": [
+              "f2"
+            ]
+          },
+          {
+            "draft_span": "project_section.2.bullets.1",
+            "fact_ids": [
+              "f3"
+            ]
+          },
+          {
+            "draft_span": "project_section.3.bullets.1",
+            "fact_ids": [
+              "f4"
+            ]
+          }
+        ]
+      },
+      "fact_cards": [
+        {
+          "id": "f1",
+          "category": "project_bullet",
+          "text": "参与 SQL 分析增长实验，转化率提升20%。",
+          "confirmed": true,
+          "source_span": "projects.p1.bullets.0"
+        },
+        {
+          "id": "f2",
+          "category": "project_bullet",
+          "text": "协助核对实验记录并整理分析结论。",
+          "confirmed": true,
+          "source_span": "projects.p1.bullets.1"
+        },
+        {
+          "id": "f3",
+          "category": "project_bullet",
+          "text": "使用 Python 整理报表，周转时间缩短40%。",
+          "confirmed": true,
+          "source_span": "projects.p2.bullets.0"
+        },
+        {
+          "id": "f4",
+          "category": "project_bullet",
+          "text": "独立主导 Kafka 集群，收入提升90%。",
+          "confirmed": false,
+          "source_span": "projects.p3.bullets.0"
+        }
+      ]
+    },
+    "en": {
+      "language": "en",
+      "company": "Example Company",
+      "jd_text": "Data Analyst Intern\nAnalyze growth experiments with SQL and prepare reports with Python. Kafka is optional.",
+      "jd_profile": {
+        "job_title": "Data Analyst Intern",
+        "hiring_track": "intern",
+        "language": "en",
+        "must_have_skills": [
+          "SQL",
+          "Python"
+        ],
+        "nice_to_have_skills": [
+          "Kafka"
+        ],
+        "keywords": [
+          "SQL",
+          "Python"
+        ],
+        "responsibilities": [
+          "Analyze growth experiments"
+        ]
+      },
+      "candidate_profile": {
+        "basics": {
+          "language": "en"
+        },
+        "projects": [
+          {
+            "id": "p1",
+            "name": "Growth experiment",
+            "bullets": [
+              "Participated in SQL analysis of a growth experiment; conversion improved by 20%.",
+              "Assisted in checking experiment records and documenting findings."
+            ]
+          },
+          {
+            "id": "p2",
+            "name": "Reporting",
+            "bullets": [
+              "Used Python to prepare reports; turnaround time reduced by 40%."
+            ]
+          }
+        ],
+        "skills": {
+          "hard_skills": [
+            "SQL",
+            "Python"
+          ]
+        }
+      },
+      "draft": {
+        "headline": "Data Analyst Intern",
+        "skills_section": [
+          "SQL",
+          "Python"
+        ],
+        "project_section": [
+          {
+            "heading": "Growth experiment",
+            "bullets": [
+              "Participated in SQL analysis of a growth experiment; conversion improved by 20%.",
+              "Assisted in checking experiment records and documenting findings."
+            ]
+          },
+          {
+            "heading": "Reporting",
+            "bullets": [
+              "Used Python to prepare reports; turnaround time reduced by 40%."
+            ]
+          },
+          {
+            "heading": "Unconfirmed draft",
+            "bullets": [
+              "Solely responsible for a Kafka cluster; revenue increased by 90%."
+            ]
+          }
+        ],
+        "traceability": [
+          {
+            "draft_span": "project_section.1.bullets.1",
+            "fact_ids": [
+              "f1"
+            ]
+          },
+          {
+            "draft_span": "project_section.1.bullets.2",
+            "fact_ids": [
+              "f2"
+            ]
+          },
+          {
+            "draft_span": "project_section.2.bullets.1",
+            "fact_ids": [
+              "f3"
+            ]
+          },
+          {
+            "draft_span": "project_section.3.bullets.1",
+            "fact_ids": [
+              "f4"
+            ]
+          }
+        ]
+      },
+      "fact_cards": [
+        {
+          "id": "f1",
+          "category": "project_bullet",
+          "text": "Participated in SQL analysis of a growth experiment; conversion improved by 20%.",
+          "confirmed": true,
+          "source_span": "projects.p1.bullets.0"
+        },
+        {
+          "id": "f2",
+          "category": "project_bullet",
+          "text": "Assisted in checking experiment records and documenting findings.",
+          "confirmed": true,
+          "source_span": "projects.p1.bullets.1"
+        },
+        {
+          "id": "f3",
+          "category": "project_bullet",
+          "text": "Used Python to prepare reports; turnaround time reduced by 40%.",
+          "confirmed": true,
+          "source_span": "projects.p2.bullets.0"
+        },
+        {
+          "id": "f4",
+          "category": "project_bullet",
+          "text": "Solely responsible for a Kafka cluster; revenue increased by 90%.",
+          "confirmed": false,
+          "source_span": "projects.p3.bullets.0"
+        }
+      ]
+    }
+  },
+  "cases": [
+    {
+      "id": "materials-zh",
+      "kind": "materials",
+      "context_id": "zh"
+    },
+    {
+      "id": "materials-en",
+      "kind": "materials",
+      "context_id": "en"
+    },
+    {
+      "id": "interview-honest-zh",
+      "kind": "interview",
+      "context_id": "zh",
+      "answer": "背景是增长实验复盘。我参与 SQL 分析并协助核对记录，实验转化率提升20%。我的个人行动是分析与核对，结果来自团队实验记录。",
+      "question_index": 0,
+      "required_issue_kinds": [],
+      "forbidden_issue_kinds": [
+        "inconsistent"
+      ],
+      "required_issue_quotes": []
+    },
+    {
+      "id": "interview-inflated-zh",
+      "kind": "interview",
+      "context_id": "zh",
+      "answer": "我独立完成增长实验，使用 SQL 和 Kafka，转化率提升40%。",
+      "question_index": 0,
+      "required_issue_kinds": [
+        "inconsistent",
+        "unverified"
+      ],
+      "forbidden_issue_kinds": [],
+      "required_issue_quotes": [
+        "40%",
+        "Kafka"
+      ]
+    },
+    {
+      "id": "interview-negation-zh",
+      "kind": "interview",
+      "context_id": "zh",
+      "answer": "我没有独立完成这个项目，也没有使用 Kafka。我的实际工作是参与 SQL 分析，确认的提升幅度为20%。",
+      "question_index": 0,
+      "required_issue_kinds": [],
+      "forbidden_issue_kinds": [
+        "inconsistent"
+      ],
+      "required_issue_quotes": []
+    },
+    {
+      "id": "interview-hypothesis-zh",
+      "kind": "interview",
+      "context_id": "zh",
+      "answer": "如果将来优化分析流程，我会设想40%的目标，再验证可行性。这不是已经实现的结果，也没有实际使用 Kafka。",
+      "question_index": 1,
+      "required_issue_kinds": [],
+      "forbidden_issue_kinds": [
+        "inconsistent"
+      ],
+      "required_issue_quotes": []
+    },
+    {
+      "id": "interview-honest-en",
+      "kind": "interview",
+      "context_id": "en",
+      "answer": "The goal was to review the growth experiment. I participated in SQL analysis and assisted in checking records. Conversion improved by 20%. My contribution was analysis and record checking; the result belongs to the team.",
+      "question_index": 0,
+      "required_issue_kinds": [],
+      "forbidden_issue_kinds": [
+        "inconsistent"
+      ],
+      "required_issue_quotes": []
+    },
+    {
+      "id": "interview-inflated-en",
+      "kind": "interview",
+      "context_id": "en",
+      "answer": "I was solely responsible for the growth experiment. I used SQL and Kafka, and conversion improved by 40%.",
+      "question_index": 0,
+      "required_issue_kinds": [
+        "inconsistent",
+        "unverified"
+      ],
+      "forbidden_issue_kinds": [],
+      "required_issue_quotes": [
+        "40%",
+        "Kafka"
+      ]
+    },
+    {
+      "id": "interview-negation-en",
+      "kind": "interview",
+      "context_id": "en",
+      "answer": "I was not solely responsible and did not use Kafka. I participated in SQL analysis of the growth experiment; the confirmed improvement was 20%.",
+      "question_index": 0,
+      "required_issue_kinds": [],
+      "forbidden_issue_kinds": [
+        "inconsistent"
+      ],
+      "required_issue_quotes": []
+    },
+    {
+      "id": "interview-project-metric-isolation-en",
+      "kind": "interview",
+      "context_id": "en",
+      "answer": "I used SQL in the growth experiment and conversion improved by 40%.",
+      "question_index": 0,
+      "required_issue_kinds": [
+        "inconsistent"
+      ],
+      "forbidden_issue_kinds": [],
+      "required_issue_quotes": [
+        "40%"
+      ]
+    }
+  ]
+}
