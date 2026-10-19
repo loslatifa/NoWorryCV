@@ -130,7 +130,7 @@ def test_confirmed_job_uses_user_corrected_profile_and_facts(monkeypatch) -> Non
             "category": "project_bullet",
             "text": "独立负责实验数据清洗、分析与结论汇报",
             "source_type": "user",
-            "source_span": "follow_up.project_role",
+            "source_span": "projects.{0}.bullets.follow_up_project_role".format(parsed["candidate_profile"]["projects"][0]["id"]),
             "source_excerpt": "你在项目中具体负责哪一部分？",
             "evidence_level": "user_confirmed",
             "confidence": 1,

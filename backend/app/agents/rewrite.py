@@ -10,6 +10,7 @@ from backend.app.schemas.common import FactCard, TraceabilityRecord
 from backend.app.schemas.jd import JDProfile
 from backend.app.schemas.strategy import GapAnalysis, ResumeDraft, ResumeSectionItem, RewriteStrategy
 from backend.app.services.scoring.heuristics import normalize_token, unique_preserve_order
+from backend.app.services.confirmed_profile import is_unassigned_review_fact
 
 
 class ResumeRewriteAgent(BaseAgent):
@@ -135,6 +136,7 @@ class ResumeRewriteAgent(BaseAgent):
         strategy: RewriteStrategy,
         language: str,
     ) -> ResumeDraft:
+        fact_cards = [card for card in fact_cards if not is_unassigned_review_fact(card)]
         fallback = self._run_fallback(candidate, fact_cards, jd_profile, gap_analysis, strategy, language)
         fallback_result = self.maybe_use_fallback(fallback, force_fallback=False)
         if fallback_result is not _NO_FALLBACK:

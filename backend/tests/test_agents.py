@@ -21,6 +21,20 @@ from backend.app.services.llm.structured import StructuredLLMService
 from backend.app.services.prompt_loader import PromptLoader
 
 
+def test_parser_keeps_all_skill_categories_with_one_source_per_skill():
+    skills = SkillSet(
+        hard_skills=["SQL", "A/B Testing"], tools=["sql", "Power BI", "CI/CD"],
+        soft_skills=["跨团队协作"], languages=["英语"],
+    )
+    profile = CandidateProfile(skills=skills)
+    cards = ResumeParserAgent()._build_fact_cards(
+        profile, "技能：SQL、A/B Testing、Power BI、CI/CD、跨团队协作、英语",
+    )
+    assert [card.text for card in cards] == ["SQL", "A/B Testing", "Power BI", "CI/CD", "跨团队协作", "英语"]
+    assert all(card.category == "skill" and not card.confirmed for card in cards)
+    assert len({card.id for card in cards}) == len(cards)
+
+
 class FakeProvider:
     name = "fake"
 

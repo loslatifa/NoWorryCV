@@ -28,10 +28,10 @@ def build_follow_up_questions(
         questions.append(
             FollowUpQuestion(
                 id="missing_skill_{0}".format(len(questions) + 1),
-                prompt="你是否有能够证明“{0}”的真实学习、项目或工作经历？如果有，请说明具体场景、你的动作和结果。".format(
+                prompt="是否希望补充与“{0}”相关的学习、项目或工作经历？可以描述具体场景、行动和结果。".format(
                     keyword
                 ),
-                reason="目标 JD 将“{0}”列为重要能力，但当前简历中缺少可追溯证据。".format(keyword),
+                reason="目标 JD 关注“{0}”，可以补充简历尚未展开的相关细节。".format(keyword),
                 priority="recommended" if keyword in jd_profile.must_have_skills else "optional",
                 suggested_category="general",
                 related_keywords=[keyword],
@@ -45,10 +45,10 @@ def build_follow_up_questions(
         questions.append(
             FollowUpQuestion(
                 id="quantified_impact",
-                prompt="关于“{0}”，是否有你能够确认的规模或结果数据，例如用户量、转化率、效率、收入、成本或交付周期？".format(
+                prompt="关于“{0}”，是否希望补充规模或结果数据，例如用户量、转化率、效率、收入、成本或交付周期？".format(
                     measurable_fact.text
                 ),
-                reason="补充真实量化结果可以提高经历的可信度和说服力；没有数据时可选择无法提供。",
+                reason="具体数据有助于呈现成果；没有可补充的数据时，保留原有描述即可。",
                 priority="recommended",
                 suggested_category="achievement",
             )
@@ -58,8 +58,8 @@ def build_follow_up_questions(
         questions.append(
             FollowUpQuestion(
                 id="work_scope",
-                prompt="你在最近一段工作中负责的业务范围、协作团队或服务对象是什么？请只填写可以在面试中解释清楚的内容。",
-                reason="当前经历描述缺少职责范围，难以判断你的实际贡献边界。",
+                prompt="是否希望补充最近一段工作的业务范围、协作团队或服务对象？",
+                reason="这些背景有助于读者理解工作内容。",
                 priority="optional",
                 suggested_category="general",
             )
@@ -70,7 +70,7 @@ def build_follow_up_questions(
             FollowUpQuestion(
                 id="project_role",
                 prompt="在最相关的项目中，你具体负责哪一部分？最终交付了什么，遇到过什么关键问题？",
-                reason="校招和实习筛选通常会重点区分团队项目成果与个人实际贡献。",
+                reason="补充项目分工和交付物，可以更具体地展示项目经验。",
                 priority="recommended",
                 suggested_category="project_bullet",
             )
@@ -79,8 +79,8 @@ def build_follow_up_questions(
         questions.append(
             FollowUpQuestion(
                 id="decision_ownership",
-                prompt="在最相关的工作经历中，哪些决策或关键动作由你直接负责？请说明你的职责边界。",
-                reason="社招岗位需要清楚展示个人责任范围，避免把团队成果全部归因于个人。",
+                prompt="是否希望补充相关工作中的关键决策、行动和负责内容？",
+                reason="这些细节有助于呈现岗位相关的工作经验。",
                 priority="recommended",
                 suggested_category="work_bullet",
             )
