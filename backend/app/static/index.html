@@ -1,493 +1,909 @@
 <!doctype html>
 <html lang="zh-CN">
   <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>NoWorryCV</title>
-    <link rel="stylesheet" href="/app/styles.css" />
+    <link rel="icon" type="image/svg+xml" href="/app/favicon.svg">
+    <link rel="stylesheet" href="/app/styles.css">
+    <link rel="stylesheet" href="/app/workspace.css?v=20261019-paragraphs">
   </head>
   <body>
-    <div class="page-shell">
-      <header class="hero">
-        <div class="hero-copy">
-          <p class="eyebrow">NoWorryCV</p>
-          <h1>上传简历，针对 JD 生成真实可追溯的定制版本</h1>
-          <p class="hero-text">
-            支持 PDF、DOCX、Markdown、TXT。系统会先抽取事实，再做岗位匹配、改写、审查与迭代，避免为了 ATS 关键词而越界造假。
+    <div class="workspace-layout">
+      <aside class="workspace-sidebar">
+        <a class="workspace-brand" href="/app/">
+          <span class="brand-symbol" aria-hidden="true">N<span>·</span>
+          </span>
+          <span>NoWorryCV<small>求职，心里有底</small>
+          </span>
+        </a>
+        <p class="nav-caption">我的工作空间</p>
+        <nav aria-label="工作台导航">
+          <button type="button" class="workspace-nav-item active" data-workspace-target="create" aria-current="page">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M12 5v14M5 12h14"></path>
+            </svg>
+            <span>简历定制</span>
+          </button>
+          <button type="button" class="workspace-nav-item" data-workspace-target="result">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M7 3h7l4 4v14H6V3h1Zm7 0v5h5M9 12h6M9 16h6"></path>
+            </svg>
+            <span>简历结果</span>
+          </button>
+          <button type="button" class="workspace-nav-item" data-workspace-target="history">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M3 11a9 9 0 1 1 2 7M3 4v7h7M12 7v5l3 2"></path>
+            </svg>
+            <span>任务历史</span>
+          </button>
+          <a class="workspace-nav-item" href="/app/positions.html">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect x="3" y="7" width="18" height="14" rx="2"></rect>
+              <path d="M8 7V3h8v4M3 12h18m-11 0v3h4v-3"></path>
+            </svg>
+            <span>职位投递</span>
+          </a>
+          <button type="button" class="workspace-nav-item" data-workspace-target="quality">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M4 20V10m7 10V4m7 16v-7M2 20h20"></path>
+            </svg>
+            <span>反馈与质量</span>
+          </button>
+        </nav>
+        <div class="sidebar-note">
+          <span class="local-indicator"></span>
+          <strong>本地工作空间</strong>
+          <p>从已确认的经历出发，<br>准备每一次投递。</p>
+        </div>
+      </aside>
+      <div class="workspace-main">
+        <header class="workspace-topbar">
+          <p>工作空间 <span>/</span>
+            <strong id="workspace-breadcrumb">简历定制</strong>
           </p>
-        </div>
-        <div class="hero-panel">
-          <div class="stat-chip">
-            <span>多轮优化</span>
-            <strong>1-3 轮</strong>
-          </div>
-          <div class="stat-chip">
-            <span>输入格式</span>
-            <strong>PDF / DOCX / MD / TXT</strong>
-          </div>
-          <div class="stat-chip">
-            <span>输出重点</span>
-            <strong>真实性 + ATS</strong>
-          </div>
-        </div>
-      </header>
-
-      <main class="grid">
-        <section class="panel input-panel">
-          <div class="section-title">
-            <p>Step 1</p>
-            <h2>准备基础材料</h2>
-          </div>
-
-          <section class="archive-panel" aria-labelledby="archive-title">
-            <h3 id="archive-title">基础档案与事实库</h3>
-            <p class="review-help">保存一次已确认资料，之后更换 JD 即可复用。档案会保留至你主动删除，访问凭据保存在当前浏览器。</p>
-            <label class="field compact">
-              <span>本次使用的基础资料</span>
-              <select id="archive-select"><option value="">上传新的简历</option></select>
-            </label>
-            <div class="archive-actions">
-              <button id="new-archive-job-button" type="button" class="secondary-button" disabled>用档案创建新 JD 任务</button>
-              <button id="edit-archive-button" type="button" class="secondary-button" disabled>维护档案</button>
-              <button id="export-archive-button" type="button" class="secondary-button" disabled>导出档案 JSON</button>
-              <button id="delete-archive-button" type="button" class="danger-button" disabled>删除基础档案</button>
-            </div>
-            <p id="archive-status" class="review-help" role="status">尚未保存基础档案。</p>
-            <ul id="archive-usage" class="archive-usage"></ul>
-          </section>
-
-          <section class="history-panel" aria-labelledby="history-title">
-            <h3 id="history-title">任务历史</h3>
-            <p class="review-help">查看本浏览器保存的任务，以及基础档案关联的任务。归档只整理列表，不延长数据保存期限。</p>
-            <label class="field compact"><span>搜索公司、岗位或 JD</span><input id="history-search" type="search" maxlength="200" placeholder="例如：产品经理、SQL" /></label>
-            <div class="history-filters">
-              <label class="field compact"><span>任务状态</span><select id="history-status-filter"><option value="all">全部状态</option><option value="completed">已完成</option><option value="running">运行中</option><option value="queued">排队中</option><option value="failed">失败</option><option value="cancelled">已取消</option></select></label>
-              <label class="field compact"><span>归档状态</span><select id="history-archive-filter"><option value="active">未归档</option><option value="archived">已归档</option><option value="all">全部任务</option></select></label>
-              <label class="field compact"><span>排序</span><select id="history-sort"><option value="newest">最近创建</option><option value="oldest">最早创建</option><option value="company">公司名称</option><option value="role">岗位名称</option><option value="status">任务状态</option></select></label>
-            </div>
-            <button id="refresh-history-button" type="button" class="secondary-button">刷新任务历史</button>
-            <p id="history-message" class="review-help" role="status">正在载入历史任务…</p>
-            <div id="history-list" class="history-list"></div>
-            <details id="history-comparison-panel">
-              <summary>对比任意两个已保存版本</summary>
-              <p class="review-help">可选择同一任务或不同任务中的版本。对比已归档任务时，请将归档状态切换为“全部任务”。</p>
-              <div class="comparison-picker">
-                <label class="field compact"><span>原版本任务</span><select id="compare-before-run"></select></label>
-                <label class="field compact"><span>原版本</span><select id="compare-before-version"></select></label>
-                <label class="field compact"><span>新版本任务</span><select id="compare-after-run"></select></label>
-                <label class="field compact"><span>新版本</span><select id="compare-after-version"></select></label>
+          <a href="/app/positions.html" class="topbar-link">职位投递工作台 <span aria-hidden="true">↗</span>
+          </a>
+        </header>
+        <main class="workspace-content" id="workspace-main">
+          <section id="workspace-create" class="workspace-view" data-workspace-view="create">
+            <header class="workspace-heading">
+              <div>
+                <p class="eyebrow">RESUME STUDIO</p>
+                <h1 tabindex="-1">为下一次投递，准备好简历</h1>
+                <p>上传真实经历，贴合目标岗位。每一处改写，都由你确认。</p>
               </div>
-              <button id="compare-versions-button" type="button" class="secondary-button">对比所选版本</button>
-              <p id="version-comparison-status" class="review-help" role="status"></p>
-              <div id="version-comparison-result"></div>
-            </details>
-          </section>
-
-          <form id="tailor-form" class="tailor-form">
-            <label id="resume-file-field" class="field file-field">
-              <span>简历文件</span>
-              <input id="resume-file" name="resume_file" type="file" accept=".pdf,.docx,.md,.txt" required />
-              <small>建议上传可复制文字的 PDF 或标准 DOCX。</small>
-            </label>
-
-            <label class="field">
-              <span>目标 JD</span>
-              <textarea
-                id="jd-text"
-                name="jd_text"
-                rows="10"
-                placeholder="粘贴完整 JD，包括岗位职责、要求、加分项。"
-                required
-              ></textarea>
-            </label>
-
-            <div class="inline-fields">
-              <label class="field compact"><span>目标公司（选填）</span><input id="target-company" type="text" maxlength="120" placeholder="便于整理投递材料" /></label>
-              <label class="field compact"><span>岗位名称（选填）</span><input id="target-role" type="text" maxlength="120" placeholder="留空则使用 JD 识别结果" /></label>
-            </div>
-
-            <label class="field">
-              <span>候选人备注</span>
-              <textarea
-                id="candidate-notes"
-                name="candidate_notes"
-                rows="4"
-                placeholder="例如：求职方向偏增长产品；希望强调数据分析和跨团队协作。"
-              ></textarea>
-            </label>
-
-            <div class="inline-fields">
-              <label class="field compact">
-                <span>输出语言</span>
-                <select id="output-language" name="output_language">
-                  <option value="auto">自动跟随 JD</option>
-                  <option value="zh">中文</option>
-                  <option value="en">英文</option>
-                </select>
-              </label>
-
-              <label class="field compact">
-                <span>自动迭代</span>
-                <select id="max-iterations" name="max_iterations">
-                  <option value="1">1 轮</option>
-                  <option value="2" selected>2 轮</option>
-                  <option value="3">3 轮</option>
-                </select>
-              </label>
-            </div>
-
-            <aside class="privacy-notice" aria-labelledby="privacy-title">
-              <strong id="privacy-title">隐私与数据说明</strong>
-              <p>
+            </header>
+            <ol class="workflow-strip" aria-label="简历定制流程">
+              <li class="active" data-workflow-step="1">
+                <span>01</span>
+                <div>
+                  <strong>准备材料</strong>
+                  <small>简历与目标岗位</small>
+                </div>
+              </li>
+              <li data-workflow-step="2">
+                <span>02</span>
+                <div>
+                  <strong>核对解析</strong>
+                  <small>检查遗漏与识别错误</small>
+                </div>
+              </li>
+              <li data-workflow-step="3">
+                <span>03</span>
+                <div>
+                  <strong>定制与导出</strong>
+                  <small>审阅、调整、投递</small>
+                </div>
+              </li>
+            </ol>
+            <div class="creation-layout">
+              <section class="panel input-panel">
+                <div class="card-heading">
+                  <span class="card-heading-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <path d="M7 3h7l4 4v14H6V3h1Zm7 0v5h5M9 12h6M9 16h6"></path>
+                    </svg>
+                  </span>
+                  <div>
+                    <h2>准备投递材料</h2>
+                    <p>选择基础简历，添加这次想申请的岗位。</p>
+                  </div>
+                </div>
+                <section class="archive-panel" aria-labelledby="archive-title">
+                  <h3 id="archive-title">基础资料</h3>
+                  <p class="review-help">已保存的档案可直接复用，也可以上传新的简历。</p>
+                  <label class="field compact">
+                    <span>本次使用的基础资料</span>
+                    <select id="archive-select">
+                      <option value="">上传新的简历</option>
+                    </select>
+                  </label>
+                  <details class="archive-manage">
+                    <summary>管理已保存的档案</summary>
+                    <div class="archive-actions">
+                      <button id="new-archive-job-button" type="button" class="secondary-button" disabled>用档案创建新 JD 任务</button>
+                      <button id="edit-archive-button" type="button" class="secondary-button" disabled>维护档案</button>
+                      <button id="export-archive-button" type="button" class="secondary-button" disabled>导出档案 JSON</button>
+                      <button id="delete-archive-button" type="button" class="danger-button" disabled>删除基础档案</button>
+                    </div>
+                    <p id="archive-status" class="review-help" role="status">尚未保存基础档案。</p>
+                    <ul id="archive-usage" class="archive-usage"></ul>
+                  </details>
+                </section>
+                <form id="tailor-form" class="tailor-form">
+                  <label id="resume-file-field" class="field file-field">
+                    <span>上传基础简历</span>
+                    <input id="resume-file" name="resume_file" type="file" accept=".pdf,.docx,.md,.txt" required>
+                    <small>PDF、DOCX、Markdown 或 TXT · 建议使用可复制文字的文件</small>
+                  </label>
+                  <label class="field">
+                    <span>目标岗位 JD</span>
+                    <textarea id="jd-text" name="jd_text" rows="7" placeholder="粘贴完整 JD，包括岗位职责、要求、加分项。" required></textarea>
+                  </label>
+                  <div class="inline-fields">
+                    <label class="field compact">
+                      <span>目标公司（选填）</span>
+                      <input id="target-company" type="text" maxlength="120" placeholder="便于整理投递材料">
+                    </label>
+                    <label class="field compact">
+                      <span>岗位名称（选填）</span>
+                      <input id="target-role" type="text" maxlength="120" placeholder="留空则使用 JD 识别结果">
+                    </label>
+                  </div>
+                  <section class="template-selection" aria-labelledby="template-selection-title">
+                    <div>
+                      <h3 id="template-selection-title">简历模板</h3>
+                      <p class="review-help">选择喜欢的排版，生成后也可以更换。</p>
+                    </div>
+                    <div class="template-selected-row">
+                      <div id="create-template-summary" class="template-selected-summary" aria-live="polite">正在加载模板…</div>
+                      <button id="choose-template-button" type="button" class="secondary-button" disabled>选择模板</button>
+                    </div>
+                  </section>
+                  <details class="options-details">
+                    <summary>更多设置 <span>备注、语言与简历偏好</span>
+                    </summary>
+                    <div class="settings-content">
+                      <label class="field">
+                        <span>候选人备注</span>
+                        <textarea id="candidate-notes" name="candidate_notes" rows="4" placeholder="例如：求职方向偏增长产品；希望强调数据分析和跨团队协作。"></textarea>
+                      </label>
+                      <div class="inline-fields">
+                        <label class="field compact">
+                          <span>输出语言</span>
+                          <select id="output-language" name="output_language">
+                            <option value="auto">自动跟随 JD</option>
+                            <option value="zh">中文</option>
+                            <option value="en">英文</option>
+                          </select>
+                        </label>
+                        <label class="field compact">
+                          <span>自动迭代</span>
+                          <select id="max-iterations" name="max_iterations">
+                            <option value="1">1 轮</option>
+                            <option value="2" selected>2 轮</option>
+                            <option value="3">3 轮</option>
+                          </select>
+                        </label>
+                      </div>
+                      <details class="preferences-panel">
+                        <summary>岗位与简历偏好</summary>
+                        <p class="review-help">显式选择会覆盖自动识别。地区决定纸张尺寸；页数是生成目标，导出前请检查实际分页。</p>
+                        <div id="preferences-fields" class="preferences-grid"></div>
+                        <button id="save-preferences" type="button" class="secondary-button" disabled>保存为当前档案的常用偏好</button>
+                        <p id="preferences-status" class="review-help" role="status">本次选择只影响新任务。</p>
+                      </details>
+                    </div>
+                  </details>
+                  <aside class="privacy-notice" aria-labelledby="privacy-title">
+                    <strong id="privacy-title">你的资料，由你掌握</strong>
+                    <details>
+                      <summary>数据用途与保存规则</summary>
+                      <p>
                 简历和 JD 仅用于本次解析、生成、审查、编辑与导出。匿名任务默认保存
                 <span id="privacy-retention-hours">24</span> 小时，之后自动删除；生成后也可立即删除。
                 选择保存基础档案时，已确认资料会长期保留并用于你后续创建的 JD 任务，可随时导出或删除。
                 为方便回访，当前浏览器会保存任务访问凭据至任务到期，材料内容由服务端保存。
+                本地记录版本评分和接受、拒绝、保存编辑、导出行为用于质量分析；反馈不收集自由文本，并随任务删除或到期清理。
               </p>
-              <label>
-                <input id="privacy-consent" type="checkbox" required />
-                <span>我已了解上述用途和保存期限，并同意处理所上传的求职材料。</span>
-              </label>
-            </aside>
-
-            <button id="submit-button" type="submit" class="submit-button">解析简历并确认</button>
-          </form>
-
-          <div id="request-status" class="request-status muted">
-            等待上传。提交后这里会显示运行状态。
-          </div>
-
-          <section id="confirmation-panel" class="confirmation-panel hidden" aria-labelledby="confirmation-title">
-            <div class="confirmation-heading">
-              <div>
-                <p class="micro-label">Fact check</p>
-                <h3 id="confirmation-title">确认候选人资料</h3>
-                <p>请修正解析错误，并确认每条事实。后续改写只会使用这里确认过的内容。</p>
-              </div>
-              <span id="confirmation-progress" class="confirmation-progress">0 / 0 已确认</span>
-            </div>
-
-            <div class="profile-review-block">
-              <h4>基本信息</h4>
-              <div class="profile-fields">
-                <label class="field compact">
-                  <span>姓名</span>
-                  <input id="candidate-name" type="text" autocomplete="name" />
-                </label>
-                <label class="field compact">
-                  <span>邮箱</span>
-                  <input id="candidate-email" type="email" autocomplete="email" />
-                </label>
-                <label class="field compact">
-                  <span>电话</span>
-                  <input id="candidate-phone" type="text" autocomplete="tel" />
-                </label>
-                <label class="field compact">
-                  <span>所在地</span>
-                  <input id="candidate-location" type="text" autocomplete="address-level2" />
-                </label>
-              </div>
-              <label class="field">
-                <span>个人摘要</span>
-                <textarea id="candidate-summary" rows="4" placeholder="只保留能够由原简历或本人确认的信息。"></textarea>
-              </label>
-            </div>
-
-            <div class="profile-review-block">
-              <h4>经历结构</h4>
-              <p class="review-help">可修正公司、岗位、时间、项目和教育信息；具体职责与成果请在事实卡中确认。</p>
-              <div id="structured-profile"></div>
-            </div>
-
-            <section id="follow-up-block" class="follow-up-block hidden">
-              <div class="facts-heading">
-                <div>
-                  <h4>补充关键信息</h4>
-                  <p class="review-help">这些问题来自 JD 与简历之间的信息缺口。可以回答、选择无法提供，或明确跳过。</p>
-                </div>
-                <span id="follow-up-progress" class="confirmation-progress">0 / 0 已处理</span>
-              </div>
-              <div id="follow-up-list" class="follow-up-list"></div>
-            </section>
-
-            <div class="facts-heading">
-              <div>
-                <h4>事实卡</h4>
-                <p class="review-help">置信度低于 80% 的内容会高亮。删除不准确的事实，或补充遗漏信息。</p>
-              </div>
-              <div class="confirmation-actions compact-actions">
-                <button id="add-fact-button" type="button" class="secondary-button">新增事实</button>
-                <button id="confirm-all-button" type="button" class="secondary-button">全部标为准确</button>
-              </div>
-            </div>
-            <div id="fact-card-list" class="fact-card-list"></div>
-
-            <div class="confirmation-consent">
-              <label>
-                <input id="profile-confirmed" type="checkbox" />
-                <span>我已核对基本信息和经历结构，并确认所有保留的事实准确。</span>
-              </label>
-            </div>
-
-            <section class="archive-save-panel">
-              <label class="field compact"><span>档案名称</span><input id="archive-label" type="text" maxlength="80" value="基础档案" /></label>
-              <label class="fact-confirm"><input id="archive-storage-consent" type="checkbox" /><span>同意将已确认资料保存为可复用档案，保留至我主动删除。</span></label>
-              <button id="save-archive-button" type="button" class="secondary-button" disabled>保存基础档案</button>
-              <p id="archive-save-status" class="review-help" role="status">核对并确认资料后，可以单独保存档案。</p>
-            </section>
-
-            <div class="confirmation-actions">
-              <button id="back-to-upload-button" type="button" class="secondary-button">返回修改材料</button>
-              <button id="confirm-generate-button" type="button" class="submit-button" disabled>确认并生成定制简历</button>
-            </div>
-          </section>
-
-          <div id="waiting-panel" class="waiting-panel hidden">
-            <div class="progress-head">
-              <div>
-                <p class="micro-label">Progress</p>
-                <h3 id="progress-stage">等待开始</h3>
-              </div>
-              <strong id="progress-percent">0%</strong>
-            </div>
-
-            <div class="progress-rail">
-              <div id="progress-fill" class="progress-fill"></div>
-            </div>
-
-            <div class="job-control-row">
-              <p id="job-attempt-status" class="review-help">等待任务开始。</p>
-              <div class="job-control-actions">
-                <button id="cancel-run-button" type="button" class="secondary-button">取消任务</button>
-                <button id="retry-run-button" type="button" class="submit-button hidden">从失败阶段重试</button>
-              </div>
-            </div>
-
-            <details class="stage-history-panel">
-              <summary>查看阶段执行记录</summary>
-              <div id="stage-history-list" class="stage-history-list"></div>
-            </details>
-
-            <div class="progress-steps" id="progress-steps">
-              <span class="progress-step active">分析 JD</span>
-              <span class="progress-step">提炼看板</span>
-              <span class="progress-step">匹配经历</span>
-              <span class="progress-step">生成草稿</span>
-              <span class="progress-step">质量审查</span>
-            </div>
-
-            <div class="tip-card">
-              <div class="tip-card-head">
-                <div>
-                  <p class="micro-label">等待时可快速复习</p>
-                  <p id="tip-counter" class="tip-counter">1 / 1</p>
-                </div>
-                <div class="tip-controls">
-                  <button id="tip-prev" type="button" class="tip-nav">上一个</button>
-                  <button id="tip-next" type="button" class="tip-nav">下一个</button>
-                </div>
-              </div>
-              <h4 id="tip-title">上传后会根据 JD 自动生成复习卡片</h4>
-              <p id="tip-focus" class="tip-focus">系统会优先从 JD 的硬技能、岗位能力和业务场景里提炼知识点。</p>
-              <p id="tip-body" class="tip-body">
+                    </details>
+                    <label>
+                      <input id="privacy-consent" type="checkbox" required>
+                      <span>我已了解上述用途和保存期限，并同意处理所上传的求职材料。</span>
+                    </label>
+                  </aside>
+                  <button id="submit-button" type="submit" class="submit-button">解析简历并确认</button>
+                </form>
+                <div id="request-status" class="request-status muted">准备好材料后，先解析并核对内容，再生成定制简历。</div>
+                <section id="confirmation-panel" class="confirmation-panel hidden" aria-labelledby="confirmation-title">
+                  <div class="confirmation-heading">
+                    <div>
+                      <p class="micro-label">Resume review</p>
+                      <h3 id="confirmation-title">核对解析结果</h3>
+                      <p>以你提供的简历为准。检查是否有遗漏或识别错误，可直接编辑后采用。</p>
+                    </div>
+                    <span id="confirmation-progress" class="confirmation-progress">0 条简历资料</span>
+                  </div>
+                  <div class="profile-review-block">
+                    <h4>基本信息</h4>
+                    <div class="profile-fields">
+                      <label class="field compact">
+                        <span>姓名</span>
+                        <input id="candidate-name" type="text" autocomplete="name">
+                      </label>
+                      <label class="field compact">
+                        <span>邮箱</span>
+                        <input id="candidate-email" type="email" autocomplete="email">
+                      </label>
+                      <label class="field compact">
+                        <span>电话</span>
+                        <input id="candidate-phone" type="text" autocomplete="tel">
+                      </label>
+                      <label class="field compact">
+                        <span>所在地</span>
+                        <input id="candidate-location" type="text" autocomplete="address-level2">
+                      </label>
+                    </div>
+                    <label class="field">
+                      <span>个人摘要</span>
+                      <textarea id="candidate-summary" rows="4" placeholder="从简历提取的个人摘要，可在此修正或补充。"></textarea>
+                    </label>
+                  </div>
+                  <div class="profile-review-block">
+                    <h4>完整经历</h4>
+                    <p class="review-help">每段经历集中展示名称、角色、时间和完整正文，可在同一张卡片中核对与编辑。</p>
+                    <div id="structured-profile"></div>
+                  </div>
+                  <div class="facts-heading">
+                    <div>
+                      <h4>技能与补充资料</h4>
+                      <p class="review-help">技能集中编辑。补充资料可独立保留，选择所属工作或项目后才合并到对应经历。</p>
+                    </div>
+                    <div class="confirmation-actions compact-actions">
+                      <button id="add-fact-button" type="button" class="secondary-button">补充内容</button>
+                    </div>
+                  </div>
+                  <div id="fact-card-list" class="fact-card-list"></div>
+                  <details id="follow-up-block" class="follow-up-block hidden">
+                    <summary>补充岗位相关信息（选填）</summary>
+                    <div class="facts-heading">
+                      <p class="review-help">可以补充原简历未展开的细节，也可以直接继续，不影响生成。</p>
+                      <span id="follow-up-progress" class="confirmation-progress">选填，可直接继续</span>
+                    </div>
+                    <div id="follow-up-list" class="follow-up-list"></div>
+                  </details>
+                  <div class="confirmation-consent">
+                    <label>
+                      <input id="profile-confirmed" type="checkbox">
+                      <span>解析内容符合我的原意，使用这些资料生成简历。</span>
+                    </label>
+                  </div>
+                  <section class="archive-save-panel">
+                    <label class="field compact">
+                      <span>档案名称</span>
+                      <input id="archive-label" type="text" maxlength="80" value="基础档案">
+                    </label>
+                    <label class="fact-confirm">
+                      <input id="archive-storage-consent" type="checkbox">
+                      <span>同意将已确认资料保存为可复用档案，保留至我主动删除。</span>
+                    </label>
+                    <button id="save-archive-button" type="button" class="secondary-button" disabled>保存基础档案</button>
+                    <p id="archive-save-status" class="review-help" role="status">核对并确认资料后，可以单独保存档案。</p>
+                  </section>
+                  <div class="confirmation-actions">
+                    <button id="back-to-upload-button" type="button" class="secondary-button">返回修改材料</button>
+                    <button id="confirm-generate-button" type="button" class="submit-button" disabled>采用资料并生成简历</button>
+                  </div>
+                </section>
+                <div id="waiting-panel" class="waiting-panel hidden">
+                  <div class="progress-head">
+                    <div>
+                      <p class="micro-label">Progress</p>
+                      <h3 id="progress-stage">等待开始</h3>
+                    </div>
+                    <strong id="progress-percent">0%</strong>
+                  </div>
+                  <div class="progress-rail">
+                    <div id="progress-fill" class="progress-fill"></div>
+                  </div>
+                  <div class="job-control-row">
+                    <p id="job-attempt-status" class="review-help">等待任务开始。</p>
+                    <div class="job-control-actions">
+                      <button id="cancel-run-button" type="button" class="secondary-button">取消任务</button>
+                      <button id="retry-run-button" type="button" class="submit-button hidden">从失败阶段重试</button>
+                    </div>
+                  </div>
+                  <details class="stage-history-panel">
+                    <summary>查看阶段执行记录</summary>
+                    <div id="stage-history-list" class="stage-history-list"></div>
+                  </details>
+                  <div class="progress-steps" id="progress-steps">
+                    <span class="progress-step active">分析 JD</span>
+                    <span class="progress-step">提炼看板</span>
+                    <span class="progress-step">匹配经历</span>
+                    <span class="progress-step">生成草稿</span>
+                    <span class="progress-step">质量审查</span>
+                  </div>
+                  <div class="tip-card">
+                    <div class="tip-card-head">
+                      <div>
+                        <p class="micro-label">等待时可快速复习</p>
+                        <p id="tip-counter" class="tip-counter">1 / 1</p>
+                      </div>
+                      <div class="tip-controls">
+                        <button id="tip-prev" type="button" class="tip-nav">上一个</button>
+                        <button id="tip-next" type="button" class="tip-nav">下一个</button>
+                      </div>
+                    </div>
+                    <h4 id="tip-title">上传后会根据 JD 自动生成复习卡片</h4>
+                    <p id="tip-focus" class="tip-focus">系统会优先从 JD 的硬技能、岗位能力和业务场景里提炼知识点。</p>
+                    <p id="tip-body" class="tip-body">
                 你可以手动切换到下一个知识点，系统会优先展示 SQL、A/B 测试、用户研究、增长、协作等 JD 中明确提到的内容。
               </p>
-              <p id="tip-question" class="tip-question">等待时可以先想想：如果面试官追问这个知识点，你会用什么真实经历作答？</p>
-              <div id="tip-keywords" class="tip-keywords"></div>
-            </div>
-
-            <div class="tips-ticker">
-              <div id="tips-track" class="tips-track"></div>
-            </div>
-          </div>
-        </section>
-
-        <section class="panel result-panel">
-          <div class="section-title">
-            <p>Step 2</p>
-            <h2>查看结果</h2>
-          </div>
-
-          <div id="result-placeholder" class="result-placeholder">
-            <p>结果区域会展示 JD 匹配参考分、真实性风险、评分明细、定制简历，以及 JD 复习文档和面试准备文档。</p>
-          </div>
-
-          <div id="result-root" class="result-root hidden">
-            <div class="metrics">
-              <article class="metric-card">
-                <span>JD 匹配参考分</span>
-                <strong id="ats-score">-</strong>
-              </article>
-              <article class="metric-card">
-                <span>真实性风险</span>
-                <strong id="risk-level">-</strong>
-              </article>
-              <article class="metric-card">
-                <span>招聘类型</span>
-                <strong id="hiring-track">-</strong>
-              </article>
-              <article class="metric-card">
-                <span>停止原因</span>
-                <strong id="stop-reason">-</strong>
-              </article>
-            </div>
-
-            <section id="score-explanation-panel" class="subpanel score-explanation-panel">
-              <div class="score-heading">
-                <div>
-                  <h3>JD 匹配评分明细</h3>
-                  <p id="score-status" class="review-help">正在计算原简历与当前版本的分项对照…</p>
+                    <p id="tip-question" class="tip-question">等待时可以先想想：如果面试官追问这个知识点，你会用什么真实经历作答？</p>
+                    <div id="tip-keywords" class="tip-keywords"></div>
+                  </div>
+                  <div class="tips-ticker">
+                    <div id="tips-track" class="tips-track"></div>
+                  </div>
                 </div>
-                <button id="refresh-score-button" type="button" class="secondary-button">重新计算评分</button>
-              </div>
-              <p id="score-disclaimer" class="score-disclaimer">
-                JD 匹配参考分只比较当前简历与当前 JD，不代表 ATS 通过概率、面试机会或录用结果。
-              </p>
-              <div id="score-truth-banner" class="score-truth-banner"></div>
-              <div id="score-comparison" class="score-comparison"></div>
-              <div id="score-dimensions" class="score-dimensions"></div>
-              <div class="score-detail-columns">
-                <section>
-                  <h4>关键词命中与位置</h4>
-                  <div id="score-keywords" class="score-keywords"></div>
-                </section>
-                <section>
-                  <h4>计分原因与扣分项</h4>
-                  <div id="score-reasons" class="score-reasons"></div>
-                </section>
-              </div>
-            </section>
-
-            <section id="draft-diff-panel" class="subpanel draft-diff-panel">
-              <div class="diff-heading">
-                <div>
-                  <h3>原简历与定制版本对比</h3>
-                  <p id="diff-summary" class="review-help">正在生成逐条差异…</p>
-                </div>
-                <button id="refresh-diff-button" type="button" class="secondary-button">刷新对比</button>
-              </div>
-              <div class="diff-legend" aria-label="差异类型">
-                <span class="diff-badge modified">改写</span>
-                <span class="diff-badge added">新增</span>
-                <span class="diff-badge removed">删除</span>
-                <span>点击改写内容可查看事实来源；接受或拒绝会立即更新右侧编辑器。</span>
-              </div>
-              <div id="draft-diff-list" class="draft-diff-list"></div>
-            </section>
-
-            <div class="result-columns">
-              <section class="subpanel">
-                <h3>匹配摘要</h3>
-                <p id="fit-summary"></p>
-                <h3>修改说明</h3>
-                <ul id="change-log" class="text-list"></ul>
-                <h3>风险提示</h3>
-                <ul id="risk-notes" class="text-list"></ul>
               </section>
-
-              <section class="subpanel">
-                <div class="editor-heading">
-                  <div>
-                    <h3>定制简历编辑器</h3>
-                    <p id="editor-job-context" class="review-help"></p>
-                    <p id="editor-save-status" class="review-help">生成结果已保存。</p>
-                  </div>
-                  <div class="editor-actions">
-                    <button id="undo-draft-button" type="button" class="secondary-button" disabled>撤销</button>
-                    <button id="redo-draft-button" type="button" class="secondary-button" disabled>恢复</button>
-                    <button id="save-draft-button" type="button" class="secondary-button">保存版本</button>
-                  </div>
+              <aside class="start-guide">
+                <div class="guide-document" aria-hidden="true">
+                  <div class="document-mark"></div>
+                  <i></i>
+                  <i></i>
+                  <i></i>
+                  <hr>
+                  <b></b>
+                  <i></i>
+                  <i></i>
+                  <b></b>
+                  <i></i>
+                  <i></i>
                 </div>
-
-                <div id="editor-risk-banner" class="editor-risk-banner">
+                <p class="eyebrow">每一份简历，都有依据</p>
+                <h2>真实经历，<br>更合适的表达。</h2>
+                <p>围绕这次岗位调整重点，<br>让你的经验更容易被看见。</p>
+                <ul class="guide-checks">
+                  <li>逐条核对解析与改写</li>
+                  <li>随时编辑、对比与恢复</li>
+                  <li>预览后导出 PDF / DOCX</li>
+                </ul>
+                <div class="guide-footnote">第一次使用？<br>
+                  <strong>从左侧上传基础简历开始。</strong>
+                </div>
+              </aside>
+            </div>
+          </section>
+          <section id="workspace-result" class="workspace-view" data-workspace-view="result" hidden>
+            <header class="workspace-heading">
+              <div>
+                <p class="eyebrow">YOUR TAILORED RESUME</p>
+                <h1 tabindex="-1">你的定制简历</h1>
+                <p>先审阅和调整简历，再检查匹配分析，准备投递材料。</p>
+              </div>
+            </header>
+            <section class="panel result-panel">
+              <div id="result-placeholder" class="result-placeholder">
+                <div class="empty-state">
+                  <span class="empty-state-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <path d="M7 3h7l4 4v14H6V3h1Zm7 0v5h5M9 12h6M9 16h6"></path>
+                    </svg>
+                  </span>
+                  <h2>你的下一份简历，从这里开始</h2>
+                  <p>采用解析资料并生成后，定制简历会显示在这里。</p>
+                  <button type="button" class="submit-button" data-workspace-target="create">准备简历材料 <span aria-hidden="true">→</span>
+                  </button>
+                </div>
+              </div>
+              <div id="result-pending" class="empty-state" hidden>
+                <h2>查看当前任务进度</h2>
+                <p>任务已进入生成流程。返回材料页，可查看进度、失败原因或继续处理任务。</p>
+                <button type="button" class="secondary-button" data-workspace-target="create">查看生成进度 →</button>
+              </div>
+              <div id="result-root" class="result-root hidden">
+                <div class="metrics">
+                  <article class="metric-card">
+                    <span>JD 匹配参考分</span>
+                    <strong id="ats-score">-</strong>
+                  </article>
+                  <article class="metric-card">
+                    <span>真实性风险</span>
+                    <strong id="risk-level">-</strong>
+                  </article>
+                  <article class="metric-card">
+                    <span>招聘类型</span>
+                    <strong id="hiring-track">-</strong>
+                  </article>
+                  <article class="metric-card">
+                    <span>停止原因</span>
+                    <strong id="stop-reason">-</strong>
+                  </article>
+                </div>
+                <div class="result-tabs" role="tablist" aria-label="定制简历工作区">
+                  <button type="button" id="result-tab-editor" role="tab" aria-controls="result-section-editor" aria-selected="true" tabindex="0" data-result-target="editor">简历编辑</button>
+                  <button type="button" id="result-tab-analysis" role="tab" aria-controls="result-section-analysis" aria-selected="false" tabindex="-1" data-result-target="analysis">匹配与对比</button>
+                  <button type="button" id="result-tab-materials" role="tab" aria-controls="result-section-materials" aria-selected="false" tabindex="-1" data-result-target="materials">求职材料</button>
+                  <button type="button" id="result-tab-interview" role="tab" aria-controls="result-section-interview" aria-selected="false" tabindex="-1" data-result-target="interview">面试练习</button>
+                  <button type="button" id="result-tab-delivery" role="tab" aria-controls="result-section-delivery" aria-selected="false" tabindex="-1" data-result-target="delivery">导出与保存</button>
+                </div>
+                <section class="result-tab-panel" id="result-section-editor" role="tabpanel" aria-labelledby="result-tab-editor">
+                  <section class="subpanel">
+                    <div class="editor-heading">
+                      <div>
+                        <h3>定制简历编辑器</h3>
+                        <p id="editor-job-context" class="review-help"></p>
+                        <p id="editor-save-status" class="review-help">生成结果已保存。</p>
+                      </div>
+                      <div class="editor-actions">
+                        <button id="undo-draft-button" type="button" class="secondary-button" disabled>撤销</button>
+                        <button id="redo-draft-button" type="button" class="secondary-button" disabled>恢复</button>
+                        <button id="save-draft-button" type="button" class="secondary-button">保存版本</button>
+                      </div>
+                    </div>
+                    <div id="editor-risk-banner" class="editor-risk-banner">
                   当前版本已完成真实性审查。
                 </div>
-
-                <details class="current-task-jd"><summary>查看当前任务的原始 JD</summary><pre id="current-task-jd" class="history-jd"></pre></details>
-                <div class="version-row">
-                  <label class="field compact">
-                    <span>历史版本</span>
-                    <select id="draft-version-select"></select>
-                  </label>
-                  <button id="restore-version-button" type="button" class="secondary-button">恢复此版本</button>
-                </div>
-                <label class="field compact"><span>版本名称</span><input id="version-label" type="text" maxlength="80" placeholder="例如：投递版、精简版" /></label>
-                <div class="version-manager-actions">
-                  <button id="rename-version-button" type="button" class="secondary-button">重命名所选版本</button>
-                  <button id="copy-version-button" type="button" class="secondary-button">复制所选版本</button>
-                  <button id="archive-version-button" type="button" class="secondary-button">归档所选版本</button>
-                  <button id="delete-version-button" type="button" class="danger-button">删除所选版本</button>
-                </div>
-                <p id="version-management-status" class="review-help" role="status">当前使用的版本需要先切换，才能归档或删除。</p>
-
-                <label class="field rewrite-instruction-field">
-                  <span>局部重写要求</span>
-                  <input id="rewrite-instruction" type="text" placeholder="例如：更简洁、强调量化结果，但不要新增事实。" />
-                </label>
-
-                <div id="draft-editor" class="draft-editor"></div>
-
-                <details class="markdown-preview">
-                  <summary>查看 Markdown 预览</summary>
-                  <pre id="resume-markdown" class="markdown-output"></pre>
-                </details>
-              </section>
-            </div>
-
-            <section class="subpanel export-panel">
-              <div class="export-heading">
-                <div>
-                  <h3>复制与导出</h3>
-                  <p class="review-help">先预览分页，再下载单栏 ATS 友好版 DOCX 或 PDF。</p>
-                </div>
-                <div class="copy-actions">
-                  <button id="copy-plain-button" type="button" class="secondary-button">复制纯文本</button>
-                  <button id="copy-markdown-button" type="button" class="secondary-button">复制 Markdown</button>
-                </div>
-              </div>
-
-              <div class="export-controls">
-                <label class="field compact">
-                  <span>文件名</span>
-                  <input id="export-filename" type="text" maxlength="80" placeholder="例如：张三-产品经理-定制简历" />
-                </label>
-                <button id="preview-export-button" type="button" class="secondary-button">生成分页预览</button>
-                <button id="export-docx-button" type="button" class="secondary-button" disabled>下载 DOCX</button>
-                <button id="export-pdf-button" type="button" class="secondary-button" disabled>下载 PDF</button>
-              </div>
-
-              <p id="export-status" class="review-help">请先生成分页预览，确认内容没有溢出。</p>
-              <p id="export-overflow-warning" class="export-overflow-warning hidden"></p>
-              <div id="export-preview-shell" class="export-preview-shell hidden">
-                <iframe id="export-preview-frame" class="export-preview-frame" title="简历 PDF 分页预览"></iframe>
+                    <details class="current-task-jd">
+                      <summary>查看当前任务的原始 JD</summary>
+                      <pre id="current-task-jd" class="history-jd"></pre>
+                    </details>
+                    <details class="version-tools">
+                      <summary>版本管理与恢复</summary>
+                      <div class="settings-content">
+                        <div class="version-row">
+                          <label class="field compact">
+                            <span>历史版本</span>
+                            <select id="draft-version-select"></select>
+                          </label>
+                          <button id="restore-version-button" type="button" class="secondary-button">恢复此版本</button>
+                        </div>
+                        <label class="field compact">
+                          <span>版本名称</span>
+                          <input id="version-label" type="text" maxlength="80" placeholder="例如：投递版、精简版">
+                        </label>
+                        <div class="version-manager-actions">
+                          <button id="rename-version-button" type="button" class="secondary-button">重命名所选版本</button>
+                          <button id="copy-version-button" type="button" class="secondary-button">复制所选版本</button>
+                          <button id="archive-version-button" type="button" class="secondary-button">归档所选版本</button>
+                          <button id="delete-version-button" type="button" class="danger-button">删除所选版本</button>
+                        </div>
+                        <p id="version-management-status" class="review-help" role="status">当前使用的版本需要先切换，才能归档或删除。</p>
+                      </div>
+                    </details>
+                    <label class="field rewrite-instruction-field">
+                      <span>局部重写要求</span>
+                      <input id="rewrite-instruction" type="text" placeholder="例如：更简洁、强调量化结果，但不要新增事实。">
+                    </label>
+                    <div id="draft-editor" class="draft-editor"></div>
+                    <details class="markdown-preview">
+                      <summary>查看 Markdown 预览</summary>
+                      <pre id="resume-markdown" class="markdown-output"></pre>
+                    </details>
+                  </section>
+                </section>
+                <section class="result-tab-panel" id="result-section-analysis" role="tabpanel" aria-labelledby="result-tab-analysis" hidden>
+                  <section id="draft-diff-panel" class="subpanel draft-diff-panel">
+                    <div class="diff-heading">
+                      <div>
+                        <h3>原简历与定制版本对比</h3>
+                        <p id="diff-summary" class="review-help">正在生成逐条差异…</p>
+                      </div>
+                      <button id="refresh-diff-button" type="button" class="secondary-button">刷新对比</button>
+                    </div>
+                    <div class="diff-legend" aria-label="差异类型">
+                      <span class="diff-badge modified">改写</span>
+                      <span class="diff-badge added">新增</span>
+                      <span class="diff-badge removed">删除</span>
+                      <span>点击改写内容可查看事实来源；接受或拒绝会立即更新右侧编辑器。</span>
+                    </div>
+                    <div id="draft-diff-list" class="draft-diff-list"></div>
+                  </section>
+                  <section id="score-explanation-panel" class="subpanel score-explanation-panel">
+                    <div class="score-heading">
+                      <div>
+                        <h3>JD 匹配评分明细</h3>
+                        <p id="score-status" class="review-help">正在计算原简历与当前版本的分项对照…</p>
+                      </div>
+                      <button id="refresh-score-button" type="button" class="secondary-button">重新计算评分</button>
+                    </div>
+                    <p id="score-disclaimer" class="score-disclaimer">
+                JD 匹配参考分只比较当前简历与当前 JD，不代表 ATS 通过概率、面试机会或录用结果。
+              </p>
+                    <div id="score-truth-banner" class="score-truth-banner"></div>
+                    <div id="score-comparison" class="score-comparison"></div>
+                    <div id="score-dimensions" class="score-dimensions"></div>
+                    <div class="score-detail-columns">
+                      <section>
+                        <h4>关键词命中与位置</h4>
+                        <div id="score-keywords" class="score-keywords"></div>
+                      </section>
+                      <section>
+                        <h4>计分原因与扣分项</h4>
+                        <div id="score-reasons" class="score-reasons"></div>
+                      </section>
+                    </div>
+                  </section>
+                  <section class="subpanel">
+                    <h3>匹配摘要</h3>
+                    <p id="fit-summary"></p>
+                    <h3>修改说明</h3>
+                    <ul id="change-log" class="text-list"></ul>
+                    <h3>风险提示</h3>
+                    <ul id="risk-notes" class="text-list"></ul>
+                  </section>
+                  <section class="subpanel quality-feedback-panel">
+                    <h3>评价当前简历版本</h3>
+                    <p class="review-help">评分绑定当前已保存版本，仅记录评分和原因类别。单条修改可在上方对比卡片中评价。</p>
+                    <div class="inline-fields">
+                      <label class="field compact">
+                        <span>整体评分</span>
+                        <select id="result-feedback-rating">
+                          <option value="">请选择</option>
+                          <option value="5">5 · 很满意</option>
+                          <option value="4">4 · 满意</option>
+                          <option value="3">3 · 一般</option>
+                          <option value="2">2 · 不满意</option>
+                          <option value="1">1 · 很不满意</option>
+                        </select>
+                      </label>
+                      <label class="field compact">
+                        <span>主要关注点</span>
+                        <select id="result-feedback-reason">
+                          <option value="none">无特别问题</option>
+                          <option value="accuracy">事实准确性</option>
+                          <option value="relevance">岗位相关性</option>
+                          <option value="clarity">表达清晰度</option>
+                          <option value="format">排版与格式</option>
+                          <option value="missing_information">信息遗漏</option>
+                        </select>
+                      </label>
+                    </div>
+                    <button id="result-feedback-submit" type="button" class="secondary-button">保存评价</button>
+                    <p id="result-feedback-status" class="review-help" role="status"></p>
+                    <details>
+                      <summary>查看生成版本信息</summary>
+                      <p id="generation-provenance" class="review-help"></p>
+                    </details>
+                  </section>
+                </section>
+                <section class="result-tab-panel" id="result-section-materials" role="tabpanel" aria-labelledby="result-tab-materials" hidden>
+                  <section class="subpanel materials-panel" aria-labelledby="materials-title">
+                    <h3 id="materials-title">岗位求职材料包</h3>
+                    <p class="review-help">基于当前已保存版本与 JD，准备求职信、三种长度自我介绍、项目讲稿和 HR 话术。经历原句复用已核对解析；手工编辑需本人核对。材料随任务到期或删除清理。</p>
+                    <div class="inline-fields">
+                      <label class="field">
+                        <span>已保存的材料包</span>
+                        <select id="materials-packs">
+                          <option value="">选择材料包</option>
+                        </select>
+                      </label>
+                      <label class="field">
+                        <span>材料类型</span>
+                        <select id="materials-document" disabled></select>
+                      </label>
+                    </div>
+                    <div class="archive-actions">
+                      <button id="materials-generate" type="button" class="secondary-button">用当前已保存版本生成材料包</button>
+                      <button id="materials-refresh" type="button" class="secondary-button">重新载入材料包</button>
+                      <button id="materials-delete" type="button" class="danger-button" disabled>删除材料包</button>
+                    </div>
+                    <p id="materials-status" class="review-help" role="status" aria-live="polite"></p>
+                    <p id="materials-context" class="review-help"></p>
+                    <div id="materials-editor" class="hidden">
+                      <details>
+                        <summary>目标 JD、事实来源与使用提示</summary>
+                        <pre id="materials-source" class="markdown-output"></pre>
+                      </details>
+                      <p id="materials-length" class="review-help"></p>
+                      <label class="field">
+                        <span>材料正文</span>
+                        <textarea id="materials-content" rows="12" maxlength="16000"></textarea>
+                      </label>
+                      <ul id="materials-issues" class="text-list"></ul>
+                      <label class="fact-confirm">
+                        <input id="materials-reviewed" type="checkbox">
+                        <span>我已核对这份材料与简历事实一致，并检查占位内容。</span>
+                      </label>
+                      <div class="archive-actions">
+                        <button id="materials-save" type="button" class="secondary-button">保存材料与核对状态</button>
+                        <button id="materials-discard" type="button" class="secondary-button">放弃本份未保存编辑</button>
+                        <button id="materials-download" type="button" class="secondary-button" disabled>下载本份 Markdown</button>
+                        <button id="materials-download-pack" type="button" class="secondary-button" disabled>下载全部材料 ZIP</button>
+                      </div>
+                    </div>
+                  </section>
+                  <section class="subpanel">
+                    <h3>JD 复习文档</h3>
+                    <pre id="jd-review-doc" class="markdown-output"></pre>
+                  </section>
+                </section>
+                <section class="result-tab-panel" id="result-section-interview" role="tabpanel" aria-labelledby="result-tab-interview" hidden>
+                  <section class="subpanel mock-interview-panel" aria-labelledby="mock-interview-title">
+                    <h3 id="mock-interview-title">互动模拟面试</h3>
+                    <p class="review-help">围绕已保存的简历版本和当前 JD 练习，按回答追问。回答会发送到配置的模型进行评估，不会加入事实库；练习随生成任务删除或到期清理。未提交的回答不会保存。</p>
+                    <div class="inline-fields">
+                      <label class="field compact">
+                        <span>主问题轮数</span>
+                        <select id="interview-rounds">
+                          <option value="3">3 轮</option>
+                          <option value="4">4 轮</option>
+                          <option value="5">5 轮</option>
+                          <option value="6">6 轮</option>
+                        </select>
+                      </label>
+                      <label class="field compact">
+                        <span>已保存的练习</span>
+                        <select id="interview-sessions">
+                          <option value="">选择练习</option>
+                        </select>
+                      </label>
+                    </div>
+                    <div class="archive-actions">
+                      <button id="interview-start" type="button" class="secondary-button">用当前已保存版本开始新练习</button>
+                      <button id="interview-refresh" type="button" class="secondary-button">刷新练习</button>
+                      <button id="interview-finish" type="button" class="secondary-button" disabled>提前结束并复习</button>
+                      <button id="interview-delete" type="button" class="danger-button" disabled>删除所选练习</button>
+                    </div>
+                    <p id="interview-status" class="review-help" role="status" aria-live="polite"></p>
+                    <p id="interview-context" class="review-help"></p>
+                    <div id="interview-question-panel" class="hidden">
+                      <h4 id="interview-question-number"></h4>
+                      <p id="interview-question" class="interview-question"></p>
+                      <details>
+                        <summary>本题依据</summary>
+                        <p id="interview-jd-reference"></p>
+                        <p id="interview-resume-reference"></p>
+                        <ul id="interview-facts"></ul>
+                      </details>
+                      <label class="field">
+                        <span>你的回答</span>
+                        <textarea id="interview-answer" rows="5" maxlength="6000" placeholder="说清背景、个人行动与结果。不确定的数字或职责请直接说明。"></textarea>
+                      </label>
+                      <button id="interview-submit" type="button" class="secondary-button">提交回答，查看反馈与下一题</button>
+                    </div>
+                    <div id="interview-feedback" class="interview-feedback"></div>
+                    <details id="interview-report-panel" class="hidden">
+                      <summary>复习报告与完整回答</summary>
+                      <pre id="interview-report" class="markdown-output"></pre>
+                    </details>
+                    <button id="interview-download" type="button" class="secondary-button" disabled>下载复习报告 Markdown</button>
+                  </section>
+                  <section class="subpanel">
+                    <h3>面试准备文档</h3>
+                    <pre id="interview-prep-doc" class="markdown-output"></pre>
+                  </section>
+                </section>
+                <section class="result-tab-panel" id="result-section-delivery" role="tabpanel" aria-labelledby="result-tab-delivery" hidden>
+                  <section class="subpanel export-panel">
+                    <div class="export-heading">
+                      <div>
+                        <h3>复制与导出</h3>
+                        <p class="review-help">先预览分页，再下载单栏 ATS 友好版 DOCX 或 PDF。</p>
+                      </div>
+                      <div class="copy-actions">
+                        <button id="copy-plain-button" type="button" class="secondary-button">复制纯文本</button>
+                        <button id="copy-markdown-button" type="button" class="secondary-button">复制 Markdown</button>
+                      </div>
+                    </div>
+                    <div class="template-export-selection">
+                      <div>
+                        <h4>本次导出模板</h4>
+                        <p class="review-help">切换后重新预览即可导出，无需重新生成正文。保存到职位的版本沿用生成时的模板。</p>
+                      </div>
+                      <div class="template-selected-row">
+                        <div id="export-template-summary" class="template-selected-summary" aria-live="polite"></div>
+                        <button id="export-template-button" type="button" class="secondary-button">更换模板</button>
+                      </div>
+                    </div>
+                    <p id="effective-preferences" class="review-help"></p>
+                    <div class="export-controls">
+                      <label class="field compact">
+                        <span>文件名</span>
+                        <input id="export-filename" type="text" maxlength="80" placeholder="例如：张三-产品经理-定制简历">
+                      </label>
+                      <button id="preview-export-button" type="button" class="secondary-button">生成分页预览</button>
+                      <button id="export-docx-button" type="button" class="secondary-button" disabled>下载 DOCX</button>
+                      <button id="export-pdf-button" type="button" class="secondary-button" disabled>下载 PDF</button>
+                    </div>
+                    <p id="export-status" class="review-help">请先生成分页预览，确认内容没有溢出。</p>
+                    <p id="export-overflow-warning" class="export-overflow-warning hidden"></p>
+                    <div id="export-preview-shell" class="export-preview-shell hidden">
+                      <iframe id="export-preview-frame" class="export-preview-frame" title="简历 PDF 分页预览"></iframe>
+                    </div>
+                  </section>
+                  <section class="subpanel" aria-labelledby="position-link-title">
+                    <h3 id="position-link-title">关联到职位投递工作台</h3>
+                    <p class="review-help">将当前已保存版本独立长期保存到职位，保留至主动删除。原任务到期不删除此快照，投递阶段需手动更新。</p>
+                    <div class="inline-fields">
+                      <label class="field">
+                        <span>工作台所属档案</span>
+                        <select id="position-link-profile"></select>
+                      </label>
+                      <label class="field">
+                        <span>目标职位记录</span>
+                        <select id="position-link-position"></select>
+                      </label>
+                    </div>
+                    <p id="position-link-jd" class="review-help"></p>
+                    <label class="fact-confirm">
+                      <input id="position-link-consent" type="checkbox">
+                      <span>我已核对当前版本和目标职位，同意长期关联。</span>
+                    </label>
+                    <button id="position-link-save" type="button" class="secondary-button">关联当前已保存简历版本</button>
+                    <a href="/app/positions.html" target="_blank" rel="noopener" class="secondary-button">打开工作台新增职位</a>
+                    <p id="position-link-status" role="status" class="review-help"></p>
+                  </section>
+                  <section class="subpanel data-control-panel">
+                    <div>
+                      <h3>任务数据管理</h3>
+                      <p id="task-retention" class="review-help">匿名任务会在保存期限届满后自动删除。</p>
+                    </div>
+                    <button id="delete-run-button" type="button" class="danger-button">立即删除本次任务</button>
+                  </section>
+                </section>
               </div>
             </section>
-
-            <section class="subpanel data-control-panel">
+          </section>
+          <section id="workspace-history" class="workspace-view" data-workspace-view="history" hidden>
+            <header class="workspace-heading">
               <div>
-                <h3>任务数据管理</h3>
-                <p id="task-retention" class="review-help">匿名任务会在保存期限届满后自动删除。</p>
+                <p class="eyebrow">TASK LIBRARY</p>
+                <h1 tabindex="-1">每一次调整，都有记录</h1>
+                <p>回到已保存的任务，继续编辑，或比较不同版本。</p>
               </div>
-              <button id="delete-run-button" type="button" class="danger-button">立即删除本次任务</button>
+            </header>
+            <section class="history-panel workspace-collection" aria-labelledby="history-title">
+              <h3 id="history-title">任务历史</h3>
+              <p class="review-help">查看本浏览器保存的任务，以及基础档案关联的任务。归档只整理列表，不延长数据保存期限。</p>
+              <label class="field compact">
+                <span>搜索公司、岗位或 JD</span>
+                <input id="history-search" type="search" maxlength="200" placeholder="例如：产品经理、SQL">
+              </label>
+              <div class="history-filters">
+                <label class="field compact">
+                  <span>任务状态</span>
+                  <select id="history-status-filter">
+                    <option value="all">全部状态</option>
+                    <option value="completed">已完成</option>
+                    <option value="running">运行中</option>
+                    <option value="queued">排队中</option>
+                    <option value="failed">失败</option>
+                    <option value="cancelled">已取消</option>
+                  </select>
+                </label>
+                <label class="field compact">
+                  <span>归档状态</span>
+                  <select id="history-archive-filter">
+                    <option value="active">未归档</option>
+                    <option value="archived">已归档</option>
+                    <option value="all">全部任务</option>
+                  </select>
+                </label>
+                <label class="field compact">
+                  <span>排序</span>
+                  <select id="history-sort">
+                    <option value="newest">最近创建</option>
+                    <option value="oldest">最早创建</option>
+                    <option value="company">公司名称</option>
+                    <option value="role">岗位名称</option>
+                    <option value="status">任务状态</option>
+                  </select>
+                </label>
+              </div>
+              <button id="refresh-history-button" type="button" class="secondary-button">刷新任务历史</button>
+              <p id="history-message" class="review-help" role="status">正在载入历史任务…</p>
+              <div id="history-list" class="history-list"></div>
+              <details id="history-comparison-panel">
+                <summary>对比任意两个已保存版本</summary>
+                <p class="review-help">可选择同一任务或不同任务中的版本。对比已归档任务时，请将归档状态切换为“全部任务”。</p>
+                <div class="comparison-picker">
+                  <label class="field compact">
+                    <span>原版本任务</span>
+                    <select id="compare-before-run"></select>
+                  </label>
+                  <label class="field compact">
+                    <span>原版本</span>
+                    <select id="compare-before-version"></select>
+                  </label>
+                  <label class="field compact">
+                    <span>新版本任务</span>
+                    <select id="compare-after-run"></select>
+                  </label>
+                  <label class="field compact">
+                    <span>新版本</span>
+                    <select id="compare-after-version"></select>
+                  </label>
+                </div>
+                <button id="compare-versions-button" type="button" class="secondary-button">对比所选版本</button>
+                <p id="version-comparison-status" class="review-help" role="status"></p>
+                <div id="version-comparison-result"></div>
+              </details>
             </section>
-
-            <div class="result-columns">
-              <section class="subpanel">
-                <h3>JD 复习文档</h3>
-                <pre id="jd-review-doc" class="markdown-output"></pre>
-              </section>
-
-              <section class="subpanel">
-                <h3>面试准备文档</h3>
-                <pre id="interview-prep-doc" class="markdown-output"></pre>
-              </section>
-            </div>
-          </div>
-        </section>
-      </main>
+          </section>
+          <section id="workspace-quality" class="workspace-view" data-workspace-view="quality" hidden>
+            <header class="workspace-heading">
+              <div>
+                <p class="eyebrow">QUALITY INSIGHTS</p>
+                <h1 tabindex="-1">了解简历的改进过程</h1>
+                <p>查看仍在保存期内的任务表现，以及你主动提交的反馈。</p>
+              </div>
+            </header>
+            <section class="history-panel quality-panel workspace-collection" aria-labelledby="quality-title">
+              <h3 id="quality-title">反馈与质量概览</h3>
+              <p class="review-help">统计当前浏览器可访问、仍在保存期内的任务。未主动提交的评价不会计入满意度。</p>
+              <div class="history-filters">
+                <label class="field compact">
+                  <span>招聘类型</span>
+                  <select id="quality-track">
+                    <option value="all">全部类型</option>
+                    <option value="campus">校招</option>
+                    <option value="intern">实习</option>
+                    <option value="experienced">社招</option>
+                    <option value="unknown">未识别</option>
+                  </select>
+                </label>
+                <label class="field compact">
+                  <span>输出语言</span>
+                  <select id="quality-language">
+                    <option value="all">全部语言</option>
+                    <option value="zh">中文</option>
+                    <option value="en">英文</option>
+                    <option value="unknown">未识别</option>
+                  </select>
+                </label>
+              </div>
+              <button id="quality-refresh" type="button" class="secondary-button">刷新质量概览</button>
+              <p id="quality-status" class="review-help" role="status"></p>
+              <div id="quality-funnel" class="quality-funnel"></div>
+              <div id="quality-summary" class="review-help"></div>
+              <details>
+                <summary>按生成版本与日期查看趋势</summary>
+                <div id="quality-breakdown"></div>
+              </details>
+            </section>
+          </section>
+        </main>
+      </div>
     </div>
-
-    <script src="/app/app.js"></script>
+    <dialog id="template-dialog" class="template-dialog" aria-labelledby="template-dialog-title">
+      <div class="template-dialog-heading">
+        <div>
+          <h2 id="template-dialog-title">选择简历模板</h2>
+          <p id="template-catalog-status" class="review-help"></p>
+          <p id="template-import-issues" class="review-help" hidden></p>
+        </div>
+        <button id="template-close" type="button" class="secondary-button" aria-label="关闭模板选择">关闭</button>
+      </div>
+      <div class="template-dialog-content">
+        <div id="template-gallery" class="template-gallery" role="group" aria-label="可选简历模板"></div>
+        <section id="template-example" hidden>
+          <div class="template-example-toolbar">
+            <button id="template-example-back" type="button" class="secondary-button">返回模板列表</button>
+            <strong id="template-example-name"></strong>
+            <a id="template-example-link" target="_blank" rel="noopener">在新窗口查看 PDF</a>
+          </div>
+          <p class="review-help">以下为 A4 示例排版，示例内容仅用于展示模板。实际简历使用你的内容与纸张偏好。</p>
+          <iframe id="template-example-frame" title="简历模板示例 PDF"></iframe>
+        </section>
+      </div>
+      <div class="template-dialog-footer">
+        <span>实际页数随简历内容变化，导出前可检查分页。</span>
+        <button id="template-apply" type="button" class="submit-button">使用此模板</button>
+      </div>
+    </dialog>
+    <script src="/app/preferences.js?v=20261019-templates-1"></script>
+    <script src="/app/templates.js?v=20261019-templates-1"></script>
+    <script src="/app/experience_paragraphs.js?v=20261019-paragraphs"></script>
+    <script src="/app/app.js?v=20261019-paragraphs"></script>
     <script src="/app/history.js"></script>
+    <script src="/app/quality.js"></script>
+    <script src="/app/interview.js"></script>
+    <script src="/app/position_link.js"></script>
+    <script src="/app/materials.js"></script>
+    <script src="/app/workspace.js?v=20261018-review"></script>
   </body>
-  </html>
+</html>

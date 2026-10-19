@@ -56,7 +56,6 @@ const followUpList = document.getElementById("follow-up-list");
 const followUpProgress = document.getElementById("follow-up-progress");
 const factCardList = document.getElementById("fact-card-list");
 const addFactButton = document.getElementById("add-fact-button");
-const confirmAllButton = document.getElementById("confirm-all-button");
 const profileConfirmed = document.getElementById("profile-confirmed");
 const backToUploadButton = document.getElementById("back-to-upload-button");
 const confirmGenerateButton = document.getElementById("confirm-generate-button");
@@ -102,6 +101,7 @@ let draftDiffIsStale = false;
 let currentCandidateProfile = null;
 let exportPreviewUrl = "";
 let exportPreviewSnapshot = "";
+let exportTemplateId = "ats_standard";
 let scoreExplanation = null;
 let scoreExplanationIsStale = false;
 
@@ -262,16 +262,45 @@ function renderStructuredGroup(title, kind, items, fields) {
 
   items.forEach((item, index) => {
     const entry = document.createElement("div");
-    entry.className = "structured-entry";
+    const isExperience = kind === "work_experiences" || kind === "projects";
+    entry.className = `structured-entry${isExperience ? " experience-review-card" : ""}`;
     entry.dataset.kind = kind;
     entry.dataset.index = String(index);
+    entry.dataset.entryId = item.id;
+    const metadata = document.createElement("div");
+    metadata.className = "structured-entry-meta";
     fields.forEach(([label, fieldName]) => {
-      entry.appendChild(makeReviewField(label, item[fieldName], fieldName));
+      metadata.appendChild(makeReviewField(label, item[fieldName], fieldName));
     });
+    entry.appendChild(metadata);
+    if (isExperience) {
+      const facts = factsForExperience(kind, item.id);
+      const paragraphLabel = document.createElement("label");
+      paragraphLabel.className = "field experience-paragraph-field";
+      const paragraphTitle = document.createElement("span");
+      paragraphTitle.textContent = "经历正文";
+      const paragraph = document.createElement("textarea");
+      paragraph.className = "experience-paragraph";
+      paragraph.rows = 5;
+      paragraph.value = ExperienceParagraphs.paragraphFor(facts, item.review_paragraph);
+      paragraph.placeholder = "用完整段落描述这段经历的职责、行动与成果。";
+      paragraph.setAttribute("aria-label", `${kind === "projects" ? item.name : item.company || "工作经历"}完整正文`);
+      paragraph.addEventListener("input", invalidateReview);
+      paragraphLabel.append(paragraphTitle, paragraph);
+      entry.appendChild(paragraphLabel);
+      const sourceDetails = document.createElement("details");
+      sourceDetails.className = "experience-source-details";
+      const summary = document.createElement("summary");
+      summary.textContent = "查看来源文字";
+      const source = document.createElement("p");
+      source.textContent = [...new Set(facts.map(fact => fact.source_excerpt || fact.text))].join(" ") || "来源：你的补充";
+      sourceDetails.append(summary, source);
+      entry.appendChild(sourceDetails);
+    }
     const remove = document.createElement("button");
     remove.type = "button";
     remove.className = "text-button danger-button";
-    remove.textContent = "删除此经历及其事实";
+    remove.textContent = "删除此经历及其内容";
     remove.addEventListener("click", () => {
       const profile = collectCandidateProfile();
       previewData.fact_cards = collectFactCards().filter((fact) => !fact.source_span.startsWith(`${kind}.${item.id}.`) && fact.source_span !== `${kind}.${item.id}`);
@@ -289,6 +318,7 @@ function renderStructuredGroup(title, kind, items, fields) {
 }
 
 function renderStructuredProfile(profile) {
+  experienceReviewCache.clear();
   structuredProfile.innerHTML = "";
   renderStructuredGroup("工作经历", "work_experiences", profile.work_experiences, [
     ["公司", "company"],
@@ -299,6 +329,8 @@ function renderStructuredProfile(profile) {
   renderStructuredGroup("项目经历", "projects", profile.projects, [
     ["项目名称", "name"],
     ["担任角色", "role"],
+    ["开始时间", "start_date"],
+    ["结束时间", "end_date"],
   ]);
   renderStructuredGroup("教育经历", "education", profile.education, [
     ["学校", "school"],
@@ -310,9 +342,10 @@ function renderStructuredProfile(profile) {
   if (!structuredProfile.children.length) {
     const empty = document.createElement("p");
     empty.className = "review-help";
-    empty.textContent = "未解析到结构化经历；你仍可通过下方事实卡补充信息。";
+    empty.textContent = "未解析到结构化经历；你仍可通过下方简历内容区补充信息。";
     structuredProfile.appendChild(empty);
   }
+  refreshFollowUpOwners();
 }
 
 function collectCandidateProfile() {
@@ -329,35 +362,106 @@ function collectCandidateProfile() {
     entry.querySelectorAll("input[data-field]").forEach((input) => {
       item[input.dataset.field] = input.value.trim() || null;
     });
+    const paragraph = entry.querySelector(".experience-paragraph");
+    if (paragraph) {
+      const current = ExperienceParagraphs.displayText(paragraph.value);
+      const baseline = ExperienceParagraphs.paragraphFor(factsForExperience(entry.dataset.kind, item.id), item.review_paragraph);
+      item.review_paragraph = !item.review_paragraph && current === baseline ? null : current;
+    }
   });
   return profile;
 }
 
 function factCategoryLabel(category) {
   const labels = {
-    work_bullet: "工作事实",
-    project_bullet: "项目事实",
+    work_bullet: "工作内容",
+    project_bullet: "项目内容",
     skill: "技能",
     education: "教育",
     certification: "证书",
     achievement: "补充成果",
-    general: "补充事实",
+    general: "补充内容",
   };
   return labels[category] || category || "事实";
 }
 
+// Keep individual source IDs for generation while editing skills in one place.
+let skillReviewSources = new Map();
+let experienceReviewCache = new Map();
+const skillKey = (text) => text.trim().replace(/\s+/g, " ").toLowerCase();
+
+function collectSkillFacts() {
+  const editor = document.getElementById("review-skills");
+  if (!editor) return [];
+  const seen = new Set();
+  return editor.value.split(/[\n,，、;；]+/).map((text) => text.trim()).filter((text) => {
+    const key = skillKey(text);
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  }).map((text) => {
+    const key = skillKey(text);
+    let source = skillReviewSources.get(key);
+    if (!source) {
+      source = {
+        id: `fact_skill_${createIdempotencyKey()}`, category: "skill", text,
+        source_type: "user", source_span: "skills", source_excerpt: text,
+        evidence_level: "user_confirmed", confidence: 1,
+        allowed_operations: ["rewrite", "reorder", "highlight"],
+      };
+      skillReviewSources.set(key, source);
+    }
+    return { ...source, text, confirmed: profileConfirmed.checked };
+  });
+}
+
+function factsForExperience(kind, id) {
+  const prefix = `${kind}.${id}.bullets.`;
+  return previewData.fact_cards.filter(fact => fact.source_span.startsWith(prefix));
+}
+
+function collectExperienceFacts() {
+  return Array.from(structuredProfile.querySelectorAll(".experience-review-card")).flatMap(entry => {
+    const kind = entry.dataset.kind;
+    const id = entry.dataset.entryId;
+    const text = ExperienceParagraphs.displayText(entry.querySelector(".experience-paragraph").value);
+    const key = `${kind}.${id}`;
+    let cached = experienceReviewCache.get(key);
+    if (!cached || cached.text !== text) {
+      cached = { text, facts: ExperienceParagraphs.reconcile(factsForExperience(kind, id), text, {
+        kind, ownerId: id, createId: () => `fact_review_${createIdempotencyKey()}`,
+      }) };
+      experienceReviewCache.set(key, cached);
+    }
+    return cached.facts.map(fact => ({ ...fact, confirmed: profileConfirmed.checked }));
+  });
+}
+
 function collectFactCards() {
-  return Array.from(factCardList.querySelectorAll(".fact-review-card")).map((cardElement) => {
+  const entries = Array.from(factCardList.querySelectorAll(".fact-review-card")).map((cardElement) => {
     const original = previewData.fact_cards.find((card) => card.id === cardElement.dataset.factId) || {};
+    const text = cardElement.querySelector("textarea").value.trim();
+    const edited = text !== original.text;
+    const category = cardElement.querySelector(".fact-category").value;
+    const owner = cardElement.querySelector(".fact-owner")?.value || original.source_span || "user_added";
     return {
       ...original,
       id: cardElement.dataset.factId,
-      category: cardElement.querySelector("select").value,
-      text: cardElement.querySelector("textarea").value.trim(),
-      confirmed: cardElement.querySelector("input[type='checkbox']").checked,
-      source_span: cardElement.querySelector(".fact-owner")?.value || original.source_span || "user_added",
+      category: category === "skill" ? "skill" : owner.startsWith("work_experiences.") ? "work_bullet"
+        : owner.startsWith("projects.") ? "project_bullet" : category,
+      text,
+      confirmed: profileConfirmed.checked,
+      source_span: category === "skill" ? "skills" : owner,
+      // Edits become user supplied content rather than claiming verbatim extraction.
+      ...(edited ? { source_type: "user", evidence_level: "user_confirmed", source_excerpt: text, confidence: 1 } : {}),
     };
   });
+  return [...collectSkillFacts(), ...collectExperienceFacts(), ...entries];
+}
+
+function invalidateReview() {
+  profileConfirmed.checked = false;
+  updateConfirmationState();
 }
 
 function collectFollowUpAnswers() {
@@ -367,11 +471,43 @@ function collectFollowUpAnswers() {
     answer: card.querySelector("textarea").value.trim(),
     suggestedCategory: card.dataset.suggestedCategory || "general",
     prompt: card.dataset.prompt || "",
+    sourceSpan: card.querySelector(".follow-up-owner")?.value || `follow_up.${card.dataset.questionId}`,
   }));
+}
+
+function createExperienceOwner(sourceSpan, factId, unassignedSpan = null) {
+  const owner = document.createElement("select");
+  owner.className = "fact-owner";
+  owner.setAttribute("aria-label", "内容所属经历或项目");
+  const defaultOwner = document.createElement("option");
+  defaultOwner.value = unassignedSpan || (sourceSpan.startsWith("work_experiences.") || sourceSpan.startsWith("projects.") ? "user_added" : sourceSpan);
+  defaultOwner.textContent = "独立补充资料（未指定经历）";
+  owner.appendChild(defaultOwner);
+  ["work_experiences", "projects"].forEach(kind => {
+    (previewData.candidate_profile[kind] || []).forEach(item => {
+      const prefix = `${kind}.${item.id}.bullets.`;
+      const option = document.createElement("option");
+      option.value = sourceSpan.startsWith(prefix) ? sourceSpan : `${prefix}${factId}`;
+      option.textContent = kind === "projects" ? `项目：${item.name}` : `工作：${item.company || "未命名公司"} · ${item.title || "未填写岗位"}`;
+      option.selected = sourceSpan.startsWith(prefix);
+      owner.appendChild(option);
+    });
+  });
+  return owner;
+}
+
+function refreshFollowUpOwners() {
+  followUpList.querySelectorAll(".follow-up-card").forEach(card => {
+    const select = card.querySelector(".follow-up-owner");
+    if (!select) return;
+    const updated = createExperienceOwner(select.value, `follow_up_${card.dataset.questionId}`, `follow_up.${card.dataset.questionId}`);
+    select.replaceChildren(...Array.from(updated.children));
+  });
 }
 
 function renderFollowUpQuestions(questions) {
   followUpList.innerHTML = "";
+  followUpBlock.open = false;
   if (!questions?.length) {
     followUpBlock.classList.add("hidden");
     return;
@@ -388,14 +524,13 @@ function renderFollowUpQuestions(questions) {
     const header = document.createElement("div");
     header.className = "fact-card-head";
     const priority = document.createElement("span");
-    priority.className = `question-priority ${question.priority === "recommended" ? "recommended" : ""}`;
-    priority.textContent = question.priority === "recommended" ? "建议回答" : "选答";
+    priority.className = "question-priority";
+    priority.textContent = "选填";
     const status = document.createElement("select");
+    status.setAttribute("aria-label", "是否补充这项信息");
     [
-      ["pending", "请选择处理方式"],
-      ["answered", "回答并加入事实"],
-      ["unavailable", "无法提供"],
-      ["skipped", "暂时跳过"],
+      ["skipped", "本次不补充"],
+      ["answered", "补充到简历资料"],
     ].forEach(([value, label]) => {
       const option = document.createElement("option");
       option.value = value;
@@ -413,15 +548,20 @@ function renderFollowUpQuestions(questions) {
     const answer = document.createElement("textarea");
     answer.className = "hidden";
     answer.rows = 3;
-    answer.placeholder = "请写成你能够在面试中解释和证明的完整事实。";
-    answer.setAttribute("aria-label", "补充事实回答");
+    answer.placeholder = "补充你希望放入简历的场景、行动或结果。";
+    answer.setAttribute("aria-label", "补充简历内容");
+    const owner = createExperienceOwner(`follow_up.${question.id}`, `follow_up_${question.id}`);
+    owner.classList.add("follow-up-owner", "hidden");
+    owner.setAttribute("aria-label", "补充内容所属经历");
 
     status.addEventListener("change", () => {
       answer.classList.toggle("hidden", status.value !== "answered");
-      updateConfirmationState();
+      owner.classList.toggle("hidden", status.value !== "answered");
+      invalidateReview();
     });
-    answer.addEventListener("input", updateConfirmationState);
-    article.append(header, prompt, reason, answer);
+    answer.addEventListener("input", invalidateReview);
+    owner.addEventListener("change", invalidateReview);
+    article.append(header, prompt, reason, answer, owner);
     followUpList.appendChild(article);
   });
 }
@@ -431,10 +571,11 @@ function buildFactsFromFollowUpAnswers() {
     .filter((item) => item.status === "answered" && item.answer)
     .map((item) => ({
       id: `fact_follow_up_${item.id}_${createIdempotencyKey()}`,
-      category: item.suggestedCategory,
+      category: item.sourceSpan.startsWith("work_experiences.") ? "work_bullet"
+        : item.sourceSpan.startsWith("projects.") ? "project_bullet" : item.suggestedCategory,
       text: item.answer,
       source_type: "user",
-      source_span: `follow_up.${item.id}`,
+      source_span: item.sourceSpan,
       source_excerpt: item.prompt,
       evidence_level: "user_confirmed",
       confidence: 1,
@@ -444,128 +585,140 @@ function buildFactsFromFollowUpAnswers() {
 }
 
 function updateConfirmationState() {
-  const checkboxes = Array.from(factCardList.querySelectorAll("input[type='checkbox']"));
-  const confirmedCount = checkboxes.filter((checkbox) => checkbox.checked).length;
-  confirmationProgress.textContent = `${confirmedCount} / ${checkboxes.length} 已确认`;
-  const allFactsReady = checkboxes.length > 0 && checkboxes.every((checkbox) => checkbox.checked);
-  const allTextsReady = Array.from(factCardList.querySelectorAll("textarea")).every(
-    (textarea) => textarea.value.trim().length > 0,
-  );
+  const facts = previewData ? collectFactCards() : [];
   const followUps = collectFollowUpAnswers();
-  const resolvedFollowUps = followUps.filter(
-    (item) => item.status !== "pending" && (item.status !== "answered" || item.answer),
-  );
-  followUpProgress.textContent = `${resolvedFollowUps.length} / ${followUps.length} 已处理`;
-  const allFollowUpsReady = resolvedFollowUps.length === followUps.length;
-  confirmGenerateButton.disabled = !(
-    allFactsReady &&
-    allTextsReady &&
-    allFollowUpsReady &&
-    profileConfirmed.checked
-  );
+  const additions = followUps.filter((item) => item.status === "answered" && item.answer);
+  const workCount = structuredProfile.querySelectorAll('[data-kind="work_experiences"]').length;
+  const projectCount = structuredProfile.querySelectorAll('[data-kind="projects"]').length;
+  confirmationProgress.textContent = `${workCount} 段工作 · ${projectCount} 个项目 · ${collectSkillFacts().length} 项技能`;
+  followUpProgress.textContent = additions.length ? `已补充 ${additions.length} 项` : "选填，可直接继续";
+  const ready = facts.length + additions.length > 0 && facts.every((fact) => fact.text)
+    && followUps.every((item) => item.status !== "answered" || item.answer);
+  confirmGenerateButton.disabled = !(ready && profileConfirmed.checked);
   saveArchiveButton.disabled = confirmGenerateButton.disabled || !archiveStorageConsent.checked || archiveSaving;
 }
 
 function renderFactCards() {
   factCardList.innerHTML = "";
-  previewData.fact_cards.forEach((fact) => {
+  skillReviewSources = new Map();
+  const skills = previewData.fact_cards.filter((fact) => fact.category === "skill");
+  skills.forEach((fact) => {
+    if (!skillReviewSources.has(skillKey(fact.text))) skillReviewSources.set(skillKey(fact.text), fact);
+  });
+  const skillsSection = document.createElement("section");
+  skillsSection.className = "skill-review-section";
+  const skillsLabel = document.createElement("label");
+  skillsLabel.htmlFor = "review-skills";
+  skillsLabel.textContent = "技能与工具";
+  const skillsHelp = document.createElement("p");
+  skillsHelp.id = "review-skills-help";
+  skillsHelp.className = "review-help";
+  skillsHelp.textContent = "技能、工具和语言集中编辑，用逗号或换行分隔。空格和斜杠会保留在技能名称中。";
+  const skillsEditor = document.createElement("textarea");
+  skillsEditor.id = "review-skills";
+  skillsEditor.rows = 3;
+  skillsEditor.placeholder = "例如：Python、SQL、Power BI、CI/CD、英语";
+  skillsEditor.setAttribute("aria-describedby", skillsHelp.id);
+  skillsEditor.value = Array.from(skillReviewSources.values()).map((fact) => fact.text).join("、");
+  skillsEditor.addEventListener("input", invalidateReview);
+  skillsSection.append(skillsLabel, skillsHelp, skillsEditor);
+  factCardList.appendChild(skillsSection);
+
+  const groups = new Map();
+  const groupFor = (fact) => {
+    for (const kind of ["work_experiences", "projects"]) {
+      const item = previewData.candidate_profile[kind]?.find((entry) => fact.source_span.startsWith(`${kind}.${entry.id}.`));
+      if (item) return [kind + item.id, kind === "projects" ? `项目 · ${item.name}` : `工作 · ${item.company || "未命名公司"} · ${item.title || "未填写岗位"}`];
+    }
+    return ["work_bullet", "project_bullet", "achievement", "general"].includes(fact.category)
+      ? ["supplements", "补充资料（待指定经历）"] : [fact.category, factCategoryLabel(fact.category)];
+  };
+  previewData.fact_cards.filter((fact) => fact.category !== "skill"
+    && !["work_experiences", "projects"].some(kind =>
+      previewData.candidate_profile[kind]?.some(item => fact.source_span.startsWith(`${kind}.${item.id}.bullets.`))
+    )).forEach((fact) => {
+    const [key, label] = groupFor(fact);
+    if (!groups.has(key)) {
+      const section = document.createElement("section");
+      section.className = "resume-review-group";
+      const heading = document.createElement("h5");
+      heading.textContent = label;
+      section.appendChild(heading);
+      factCardList.appendChild(section);
+      groups.set(key, section);
+    }
     const article = document.createElement("article");
-    article.className = `fact-review-card${fact.confidence < 0.8 ? " low-confidence" : ""}`;
+    article.className = "fact-review-card";
     article.dataset.factId = fact.id;
-
-    const header = document.createElement("div");
-    header.className = "fact-card-head";
-    const category = document.createElement("select");
-    ["work_bullet", "project_bullet", "skill", "education", "certification", "achievement", "general"].forEach(
-      (value) => {
-        const option = document.createElement("option");
-        option.value = value;
-        option.textContent = factCategoryLabel(value);
-        option.selected = value === fact.category;
-        category.appendChild(option);
-      },
-    );
-
-    const confidence = document.createElement("span");
-    confidence.className = "confidence-badge";
-    confidence.textContent = fact.source_type === "user" ? "用户补充" : `置信度 ${Math.round(fact.confidence * 100)}%`;
-    header.append(category, confidence);
-
-    const owner = document.createElement("select");
-    owner.className = "fact-owner";
-    owner.setAttribute("aria-label", "事实所属经历或项目");
-    const defaultOwner = document.createElement("option");
-    defaultOwner.value = fact.source_span.startsWith("work_experiences.") || fact.source_span.startsWith("projects.") ? "user_added" : (fact.source_span || "user_added");
-    defaultOwner.textContent = "通用事实 / 技能 / 其他";
-    owner.appendChild(defaultOwner);
-    ["work_experiences", "projects"].forEach((kind) => {
-      (previewData.candidate_profile[kind] || []).forEach((item) => {
-        const option = document.createElement("option");
-        const prefix = `${kind}.${item.id}.bullets.`;
-        option.value = fact.source_span.startsWith(prefix) ? fact.source_span : `${prefix}${fact.id}`;
-        option.textContent = kind === "projects" ? `项目：${item.name}` : `工作：${item.company || "未命名公司"} · ${item.title || "未填写岗位"}`;
-        option.selected = fact.source_span.startsWith(prefix);
-        owner.appendChild(option);
-      });
-    });
-
     const textarea = document.createElement("textarea");
-    textarea.rows = 3;
+    textarea.rows = 2;
     textarea.value = fact.text;
-    textarea.setAttribute("aria-label", "事实内容");
+    textarea.setAttribute("aria-label", `${label}内容`);
 
+    const details = document.createElement("details");
+    details.className = "fact-source-details";
+    const summary = document.createElement("summary");
+    summary.textContent = "查看来源与内容类型";
+    const category = document.createElement("select");
+    category.className = "fact-category";
+    category.setAttribute("aria-label", "内容类型");
+    ["work_bullet", "project_bullet", "skill", "education", "certification", "achievement", "general"].forEach((value) => {
+      const option = document.createElement("option");
+      option.value = value;
+      option.textContent = factCategoryLabel(value);
+      option.selected = value === fact.category;
+      category.appendChild(option);
+    });
+    const owner = createExperienceOwner(fact.source_span || "user_added", fact.id);
     const source = document.createElement("p");
     source.className = "fact-source";
-    source.textContent = fact.source_excerpt
-      ? `原始内容：${fact.source_excerpt}`
-      : fact.source_type === "user"
-        ? "来源：用户补充，归属见上方经历选择。"
-      : fact.source_span
-        ? `来源位置：${fact.source_span}`
-        : "来源：用户补充";
+    source.textContent = fact.source_type === "user" ? `你的补充：${fact.source_excerpt || fact.text}`
+      : fact.source_excerpt ? `简历原文：${fact.source_excerpt}` : "来源：上传的简历";
+    details.append(summary, category, source);
 
     const footer = document.createElement("div");
     footer.className = "fact-card-footer";
-    const confirmLabel = document.createElement("label");
-    confirmLabel.className = "fact-confirm";
-    const checkbox = document.createElement("input");
-    checkbox.type = "checkbox";
-    checkbox.checked = Boolean(fact.confirmed);
-    const confirmText = document.createElement("span");
-    confirmText.textContent = "此事实准确";
-    confirmLabel.append(checkbox, confirmText);
-
     const deleteButton = document.createElement("button");
     deleteButton.type = "button";
     deleteButton.className = "text-button danger-button";
-    deleteButton.textContent = "删除";
+    deleteButton.textContent = "移除此条";
     deleteButton.addEventListener("click", () => {
       previewData.fact_cards = collectFactCards().filter((item) => item.id !== fact.id);
+      profileConfirmed.checked = false;
       renderFactCards();
     });
-
-    textarea.addEventListener("input", () => {
-      checkbox.checked = false;
-      updateConfirmationState();
-    });
-    category.addEventListener("change", () => {
-      checkbox.checked = false;
-      updateConfirmationState();
-    });
-    owner.addEventListener("change", () => {
-      checkbox.checked = false;
-      updateConfirmationState();
-    });
-    checkbox.addEventListener("change", updateConfirmationState);
-    footer.append(confirmLabel, deleteButton);
-    article.append(header, owner, textarea, source, footer);
-    factCardList.appendChild(article);
+    textarea.addEventListener("input", invalidateReview);
+    const regroup = () => {
+      const profile = collectCandidateProfile();
+      const facts = collectFactCards();
+      previewData.candidate_profile = profile;
+      previewData.fact_cards = facts;
+      profileConfirmed.checked = false;
+      renderStructuredProfile(profile);
+      renderFactCards();
+    };
+    category.addEventListener("change", regroup);
+    owner.addEventListener("change", regroup);
+    footer.append(details, deleteButton);
+    article.append(textarea, owner, footer);
+    groups.get(key).appendChild(article);
   });
   updateConfirmationState();
 }
 
 function renderConfirmation(payload) {
-  previewData = payload;
+  previewData = structuredClone(payload);
+  const knownSkills = new Set(previewData.fact_cards.filter((fact) => fact.category === "skill").map((fact) => skillKey(fact.text)));
+  Object.values(previewData.candidate_profile.skills || {}).flat().forEach((text) => {
+    if (knownSkills.has(skillKey(text))) return;
+    knownSkills.add(skillKey(text));
+    previewData.fact_cards.push({
+      id: `fact_skill_${createIdempotencyKey()}`, category: "skill", text,
+      source_type: "resume", source_span: "skills", source_excerpt: "",
+      evidence_level: "explicit", confidence: 1, confirmed: false,
+      allowed_operations: ["rewrite", "reorder", "highlight"],
+    });
+  });
   const basics = payload.candidate_profile.basics || {};
   document.getElementById("candidate-name").value = valueOrEmpty(basics.name);
   document.getElementById("candidate-email").value = valueOrEmpty(basics.email);
@@ -814,12 +967,27 @@ function resetExportPreview() {
   exportStatus.textContent = "请先生成分页预览，确认内容没有溢出。";
 }
 
+function exportSnapshot() {
+  return JSON.stringify({ run: currentRunId, draft: currentDraft, template: exportTemplateId });
+}
+
+document.getElementById("export-template-button").addEventListener("click", () => {
+  openResumeTemplatePicker(exportTemplateId, value => {
+    if (value === exportTemplateId) return;
+    exportTemplateId = value;
+    renderResumeTemplateSummary("export-template-summary", value);
+    resetExportPreview();
+    exportStatus.textContent = "模板已更换，请生成新的分页预览。";
+  });
+});
+
 function invalidateExportPreview() {
   if (!exportPreviewSnapshot) return;
   exportPreviewSnapshot = "";
   exportDocxButton.disabled = true;
   exportPdfButton.disabled = true;
   exportOverflowWarning.classList.add("hidden");
+  exportPreviewShell.classList.add("hidden");
   exportStatus.textContent = "简历内容已变化，请重新生成分页预览。";
 }
 
@@ -861,17 +1029,17 @@ async function previewResumeExport() {
   exportPdfButton.disabled = true;
   exportStatus.textContent = "正在生成实际 PDF 分页预览…";
   exportOverflowWarning.classList.add("hidden");
-  const snapshot = draftSnapshot();
+  const snapshot = exportSnapshot();
   try {
     const response = await fetch(`/api/v1/tailor-runs/${currentRunId}/export-preview`, {
       method: "POST",
       headers: runRequestHeaders(),
-      body: JSON.stringify({ draft: currentDraft, filename: sanitizeExportFilename(exportFilename.value) }),
+      body: JSON.stringify({ draft: currentDraft, filename: sanitizeExportFilename(exportFilename.value), template: exportTemplateId }),
     });
     if (!response.ok) throw new Error(await getResponseError(response, "分页预览生成失败。"));
     const blob = await response.blob();
-    if (snapshot !== draftSnapshot()) {
-      exportStatus.textContent = "简历内容已变化，请重新生成分页预览。";
+    if (snapshot !== exportSnapshot()) {
+      exportStatus.textContent = "简历内容或模板已变化，请重新生成分页预览。";
       return;
     }
     if (exportPreviewUrl) URL.revokeObjectURL(exportPreviewUrl);
@@ -883,9 +1051,8 @@ async function previewResumeExport() {
     exportPreviewSnapshot = snapshot;
     exportDocxButton.disabled = false;
     exportPdfButton.disabled = false;
-    exportStatus.textContent = overflow
-      ? `预览共 ${pageCount} 页，可以导出，但不符合单页模板目标。`
-      : "预览为 1 页，适合按单页 ATS 简历导出。";
+    const target = response.headers.get("X-Target-Pages");
+    exportStatus.textContent = `预览共 ${pageCount} 页，${overflow ? "超出" : "符合"} ${target === "2" ? "2" : "1"} 页目标，可以检查后导出。DOCX 的分页可能因字体与软件不同而变化。`;
     if (overflow) {
       exportOverflowWarning.textContent = `当前内容会生成 ${pageCount} 页。建议精简摘要、技能或较弱的经历条目后重新预览。`;
       exportOverflowWarning.classList.remove("hidden");
@@ -900,22 +1067,23 @@ async function previewResumeExport() {
 
 async function downloadResumeExport(format, button) {
   if (!currentRunId || !currentDraft) return;
-  if (!exportPreviewSnapshot || exportPreviewSnapshot !== draftSnapshot()) {
+  if (!exportPreviewSnapshot || exportPreviewSnapshot !== exportSnapshot()) {
     exportStatus.textContent = "请先为当前内容生成分页预览。";
     return;
   }
   button.disabled = true;
   exportStatus.textContent = `正在生成 ${format.toUpperCase()}…`;
   const filename = sanitizeExportFilename(exportFilename.value);
-  const requestedSnapshot = draftSnapshot();
+  const requestedSnapshot = exportSnapshot();
   try {
     const response = await fetch(`/api/v1/tailor-runs/${currentRunId}/export/${format}`, {
       method: "POST",
       headers: runRequestHeaders(),
-      body: JSON.stringify({ draft: currentDraft, filename }),
+      body: JSON.stringify({ draft: currentDraft, filename, template: exportTemplateId }),
     });
     if (!response.ok) throw new Error(await getResponseError(response, "导出失败。"));
     const blob = await response.blob();
+    if (requestedSnapshot !== exportSnapshot()) throw new Error("简历内容或模板已变化，请重新预览后下载。");
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
@@ -928,7 +1096,7 @@ async function downloadResumeExport(format, button) {
   } catch (error) {
     exportStatus.textContent = error.message || "导出失败。";
   } finally {
-    button.disabled = !exportPreviewSnapshot || exportPreviewSnapshot !== draftSnapshot() || requestedSnapshot !== draftSnapshot();
+    button.disabled = !exportPreviewSnapshot || exportPreviewSnapshot !== exportSnapshot();
   }
 }
 
@@ -1130,7 +1298,7 @@ async function loadScoreExplanation() {
     scoreExplanationIsStale = false;
     renderScoreExplanation(payload);
     document.getElementById("ats-score").textContent = payload.tailored.score;
-    document.getElementById("risk-level").textContent = payload.compliance_report.risk_level;
+    document.getElementById("risk-level").textContent = humanizeRiskLevel(payload.compliance_report.risk_level);
     scoreStatus.textContent = draftIsDirty
       ? "已按当前未保存内容计算；保存后会写入版本记录。"
       : "已按当前版本计算。";
@@ -1248,7 +1416,7 @@ function renderDraftDiff() {
     title.append(badge, label);
     const state = document.createElement("span");
     state.className = "review-help";
-    state.textContent = decision === "accepted" ? "已接受" : "已拒绝";
+    state.textContent = !diffDecisions[item.id] ? "待确认（暂保留）" : decision === "accepted" ? "已接受" : "已拒绝";
     head.append(title, state);
 
     const evidence = createEvidenceBlock(item);
@@ -1268,7 +1436,7 @@ function renderDraftDiff() {
     actions.className = "diff-actions";
     const accept = document.createElement("button");
     accept.type = "button";
-    accept.className = `diff-decision${decision === "accepted" ? " is-selected" : ""}`;
+    accept.className = `diff-decision${diffDecisions[item.id] === "accepted" ? " is-selected" : ""}`;
     accept.disabled = draftDiffIsStale;
     accept.textContent = item.change_type === "removed" ? "保持删除" : "保留改写";
     accept.addEventListener("click", () => decideDraftDiff(item.id, "accepted"));
@@ -1282,6 +1450,7 @@ function renderDraftDiff() {
     reject.addEventListener("click", () => decideDraftDiff(item.id, "rejected"));
     actions.append(accept, reject);
     card.append(head, columns, warning, evidence, actions);
+    if (window.buildChangeFeedback) card.append(window.buildChangeFeedback(item, draftDiff.version_id, currentRunId));
     draftDiffList.appendChild(card);
   });
 }
@@ -1357,16 +1526,18 @@ function rebuildDraftFromDiffDecisions() {
 
 function decideDraftDiff(itemId, decision) {
   if (!currentDraft || !diffBaseDraft || diffDecisions[itemId] === decision) return;
+  window.recordQualityDecision?.(currentRunId, draftDiff.version_id, itemId, decision);
   const before = cloneDraft(currentDraft);
   diffDecisions[itemId] = decision;
   const next = rebuildDraftFromDiffDecisions();
-  if (draftSnapshot(before) !== draftSnapshot(next)) {
+  const changed = JSON.stringify({ ...before, markdown: "" }) !== JSON.stringify({ ...next, markdown: "" });
+  if (changed) {
     undoStack.push(before);
     redoStack = [];
   }
-  currentDraft = next;
+  currentDraft = changed ? next : before;
   renderDraftEditor();
-  markDraftDirty(false);
+  if (changed) markDraftDirty(false);
   renderDraftDiff();
   updateDiffSummary();
   updateDraftHistoryButtons();
@@ -1394,7 +1565,7 @@ async function loadDraftDiff() {
     }
     draftDiff = payload;
     diffBaseDraft = cloneDraft(currentDraft);
-    diffDecisions = Object.fromEntries(payload.items.map((item) => [item.id, "accepted"]));
+    diffDecisions = {};
     draftDiffIsStale = false;
     updateDiffSummary();
     renderDraftDiff();
@@ -1431,14 +1602,18 @@ function applyReviewedVersion(version, versions) {
   currentDraft = cloneDraft(version.draft);
   draftVersions = versions || draftVersions;
   activeVersionId = version.id;
+  window.changeQualityVersion?.(version);
+  window.initializeInterviewPractice?.(currentRunId, activeVersionId);
+  window.initializePositionLink?.(currentRunId, activeVersionId);
+  window.initializeMaterials?.(currentRunId, activeVersionId);
   draftIsDirty = false;
   renderDraftEditor();
   renderVersionOptions();
   const risk = version.compliance_report?.risk_level || "low";
-  editorRiskBanner.textContent = `真实性风险：${risk}；JD 匹配参考分：${version.ats_report?.score ?? "-"}。`;
+  editorRiskBanner.textContent = `真实性风险：${humanizeRiskLevel(risk)}；JD 匹配参考分：${version.ats_report?.score ?? "-"}。`;
   editorRiskBanner.className = `editor-risk-banner ${risk}`;
   editorSaveStatus.textContent = version.label || "版本已保存。";
-  document.getElementById("risk-level").textContent = risk;
+  document.getElementById("risk-level").textContent = humanizeRiskLevel(risk);
   document.getElementById("ats-score").textContent = version.ats_report?.score ?? "-";
   resetExportPreview();
   loadDraftDiff();
@@ -1448,10 +1623,18 @@ function applyReviewedVersion(version, versions) {
 
 function initializeDraftEditor(result) {
   currentRunId = result.run_id;
+  exportTemplateId = result.preferences?.template || "ats_standard";
+  preferencesReady.then(() => {
+    if (currentRunId === result.run_id) renderResumeTemplateSummary("export-template-summary", exportTemplateId);
+  }).catch(() => {});
   currentCandidateProfile = result.candidate_profile || { basics: {} };
   currentDraft = cloneDraft(result.final_package.draft);
   draftVersions = result.draft_versions || [];
   activeVersionId = result.active_version_id || draftVersions[draftVersions.length - 1]?.id || "";
+  window.initializeQualityFeedback?.(result.run_id, activeVersionId, result.provenance, result.provenance_history, draftVersions.find(version => version.id === activeVersionId));
+  window.initializeInterviewPractice?.(result.run_id, activeVersionId);
+  window.initializePositionLink?.(result.run_id, activeVersionId);
+  window.initializeMaterials?.(result.run_id, activeVersionId);
   if (!draftVersions.length) {
     const latestReview = result.reviews[result.reviews.length - 1];
     draftVersions = [{
@@ -1478,10 +1661,10 @@ function initializeDraftEditor(result) {
   updateDraftHistoryButtons();
   const latestVersion = draftVersions.find((item) => item.id === activeVersionId) || draftVersions[draftVersions.length - 1];
   const risk = latestVersion.compliance_report?.risk_level || "low";
-  editorRiskBanner.textContent = `真实性风险：${risk}；JD 匹配参考分：${latestVersion.ats_report?.score ?? "-"}。`;
+  editorRiskBanner.textContent = `真实性风险：${humanizeRiskLevel(risk)}；JD 匹配参考分：${latestVersion.ats_report?.score ?? "-"}。`;
   editorRiskBanner.className = `editor-risk-banner ${risk}`;
   editorSaveStatus.textContent = latestVersion.label || "版本已保存。";
-  document.getElementById("risk-level").textContent = risk;
+  document.getElementById("risk-level").textContent = humanizeRiskLevel(risk);
   document.getElementById("ats-score").textContent = latestVersion.ats_report?.score ?? "-";
   const candidateName = currentCandidateProfile.basics?.name?.trim();
   exportFilename.value = candidateName ? `${candidateName}-定制简历` : "定制简历";
@@ -1546,12 +1729,22 @@ async function rewriteDraftPart(targetType, sectionIndex, itemIndex, button) {
   }
 }
 
+function humanizeRiskLevel(value) {
+  return { low: "低风险", medium: "中等风险", high: "高风险" }[value] || "待核验";
+}
+
 function renderResult(result) {
+  preferencesReady.then(() => {
+    setPreferences({ ...result.preferences, language: result.resolved_language === "zh" || result.resolved_language === "en" ? result.resolved_language : "auto" });
+    const detected = result.detected_jd_profile;
+    const detection = detected ? ` 原始识别：${humanizeHiringTrack(detected.hiring_track)} / ${detected.seniority || "unknown"}；生成采用：${humanizeHiringTrack(result.jd_profile.hiring_track)} / ${result.jd_profile.seniority || "unknown"}。` : "";
+    document.getElementById("effective-preferences").textContent = `本版本偏好：${describePreferences(result.preferences)}；实际语言：${result.resolved_language}。${detection}`;
+  }).catch(() => {});
   document.body.classList.remove("review-mode");
   form.classList.remove("hidden");
   const latestReview = result.reviews[result.reviews.length - 1];
   document.getElementById("ats-score").textContent = latestReview?.ats_report?.score ?? "-";
-  document.getElementById("risk-level").textContent = latestReview?.compliance_report?.risk_level ?? "-";
+  document.getElementById("risk-level").textContent = humanizeRiskLevel(latestReview?.compliance_report?.risk_level);
   document.getElementById("hiring-track").textContent = humanizeHiringTrack(result.jd_profile?.hiring_track);
   document.getElementById("stop-reason").textContent = {
     quality_threshold_met: "达到优化标准",
@@ -1821,7 +2014,7 @@ form.addEventListener("submit", async (event) => {
   submitButton.disabled = true;
   runIsBusy = true;
   syncArchiveControls();
-  setStatus("正在解析简历并提取可追溯事实，请稍候。", "loading");
+  setStatus("正在读取简历并整理内容，请稍候。", "loading");
   confirmationPanel.classList.add("hidden");
   resultRoot.classList.add("hidden");
   resultPlaceholder.classList.remove("hidden");
@@ -1833,7 +2026,7 @@ form.addEventListener("submit", async (event) => {
       headers: archive ? archiveRequestHeaders() : {},
       body: archive ? JSON.stringify({
         jd_text: document.getElementById("jd-text").value,
-        expected_revision: archive.revision,
+        expected_revision: archive.revision, preferences: readPreferences(),
       }) : formData,
     });
     if (!response.ok) {
@@ -1844,7 +2037,7 @@ form.addEventListener("submit", async (event) => {
     document.getElementById("archive-label").value = archive?.label || "基础档案";
     archiveStorageConsent.checked = false;
     renderConfirmation(payload);
-    setStatus("解析完成。请确认基本信息、经历结构和事实卡后再开始生成。", "success");
+    setStatus("解析完成。请核对是否有遗漏或识别错误，采用这些资料即可继续生成。", "success");
   } catch (error) {
     setStatus(error.message || "解析失败，请检查文件格式或后端配置。", "error");
   } finally {
@@ -1868,15 +2061,9 @@ addFactButton.addEventListener("click", () => {
     confirmed: false,
     allowed_operations: ["rewrite", "reorder", "highlight"],
   });
+  profileConfirmed.checked = false;
   renderFactCards();
-  factCardList.lastElementChild?.querySelector("textarea")?.focus();
-});
-
-confirmAllButton.addEventListener("click", () => {
-  factCardList.querySelectorAll("input[type='checkbox']").forEach((checkbox) => {
-    checkbox.checked = true;
-  });
-  updateConfirmationState();
+  Array.from(factCardList.querySelectorAll(".fact-review-card textarea")).at(-1)?.focus();
 });
 
 profileConfirmed.addEventListener("change", updateConfirmationState);
@@ -1903,17 +2090,17 @@ confirmGenerateButton.addEventListener("click", async () => {
     (item) => item.status === "pending" || (item.status === "answered" && !item.answer),
   );
   if (unresolvedFollowUp) {
-    setStatus("请回答、跳过或标记无法提供每个补充问题。", "error");
+    setStatus("请填写已选择补充的内容，或选择“本次不补充”。", "error");
     return;
   }
 
   const confirmedFacts = [...collectFactCards(), ...buildFactsFromFollowUpAnswers()];
   if (!confirmedFacts.length || confirmedFacts.some((fact) => !fact.confirmed || !fact.text)) {
-    setStatus("请确认所有保留的事实，空白或不准确的内容可以直接删除。", "error");
+    setStatus("请填写或移除空白条目，并勾选采用解析资料。", "error");
     return;
   }
   if (!profileConfirmed.checked) {
-    setStatus("请先确认基本信息和经历结构。", "error");
+    setStatus("请先核对解析结果并勾选采用这些资料。", "error");
     return;
   }
   if (!document.getElementById("jd-text").value.trim()) {
@@ -1929,7 +2116,8 @@ confirmGenerateButton.addEventListener("click", async () => {
     resume_text: previewData.resume_text,
     jd_text: document.getElementById("jd-text").value,
     candidate_notes: document.getElementById("candidate-notes").value,
-    output_language: document.getElementById("output-language").value,
+    preferences: readPreferences(),
+    output_language: "auto",
     max_iterations: Number(document.getElementById("max-iterations").value),
     processing_mode: "full",
     confirmed_candidate_profile: collectCandidateProfile(),
@@ -1958,6 +2146,7 @@ confirmGenerateButton.addEventListener("click", async () => {
         jd_text: requestPayload.jd_text,
         candidate_notes: requestPayload.candidate_notes,
         output_language: requestPayload.output_language,
+        preferences: requestPayload.preferences,
         max_iterations: requestPayload.max_iterations,
         expected_revision: archive.revision,
         preanalyzed_jd_profile: requestPayload.preanalyzed_jd_profile,
@@ -2232,6 +2421,7 @@ function syncArchiveControls() {
   editArchiveButton.disabled = !hasArchive || archiveSaving || runIsBusy;
   newArchiveJobButton.disabled = !hasArchive || archiveSaving || runIsBusy;
   exportArchiveButton.disabled = !hasArchive || archiveSaving;
+  document.getElementById("save-preferences").disabled = !hasArchive || archiveSaving || runIsBusy;
   deleteArchiveButton.disabled = !hasArchive || archiveSaving || runIsBusy;
   archiveSelect.disabled = archiveSaving || runIsBusy;
   document.getElementById("resume-file").required = !hasArchive;
@@ -2270,6 +2460,7 @@ async function loadSelectedArchive() {
   selectedArchive = null;
   syncArchiveControls();
   if (!archiveId) {
+    await setPreferences();
     document.getElementById("archive-usage").replaceChildren();
     return;
   }
@@ -2278,12 +2469,14 @@ async function loadSelectedArchive() {
   const archive = await response.json();
   if (archiveSelect.value !== archiveId) return;
   selectedArchive = archive;
+  await setPreferences(archive.preferences);
+  document.getElementById("preferences-status").textContent = "已恢复当前档案的常用偏好，本次可继续调整。";
   syncArchiveControls();
   await refreshArchiveUsage();
 }
 
 async function saveConfirmedArchive(confirmedFacts = null) {
-  if (!profileConfirmed.checked || !archiveStorageConsent.checked) throw new Error("请确认资料准确并同意保存基础档案。");
+  if (!profileConfirmed.checked || !archiveStorageConsent.checked) throw new Error("请勾选采用这些资料，并同意保存基础档案。");
   // Ensure the browser can retain the only credential before creating the archive.
   try {
     localStorage.setItem("noworrycv-storage-check", "ok");
