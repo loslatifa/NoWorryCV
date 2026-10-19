@@ -1,5 +1,5 @@
 const RESUME_STORAGE_KEY = "jobAutoAgent.resumeOverride";
-const MAPPER_VERSION = "rule-mapper@0.2.0";
+const MAPPER_VERSION = "rule-mapper@0.3.0";
 const PLANNER_VERSION = "form-planner@0.1.0";
 const PREVIEW_VERSION = "fill-preview@0.1.0";
 
@@ -225,15 +225,18 @@ function mapSingleField(field, resume, context) {
 }
 
 function buildMapping(field, result) {
+  const prepared = result.value ? NoWorryCVFormControls.prepareValue(field, result.value) : null;
+  const blocked = Boolean(prepared?.reason || field.disabled || field.read_only);
   return {
     selector: field.selector,
     field_selector: field.selector,
     field_label: field.label || field.placeholder || field.name || field.id || bestSemanticLabel(field) || "",
     field_type: field.type || field.tag || "text",
-    matched_resume_path: result.path,
-    fill_value: result.value,
-    confidence: result.confidence,
-    notes: result.notes,
+    matched_resume_path: blocked ? null : result.path,
+    fill_value: blocked ? "" : prepared?.value || result.value,
+    confidence: blocked ? 0.2 : result.confidence,
+    notes: prepared?.reason || (blocked ? "控件已禁用或只读，请手动处理。" : result.notes),
+    review_reason: prepared?.reason || (blocked ? "控件已禁用或只读，请手动处理。" : ""),
     mapper_version: MAPPER_VERSION
   };
 }
@@ -390,6 +393,7 @@ function buildFillPreview(fields, resume) {
       fill_value: mapping.fill_value || "",
       confidence,
       notes: mapping.notes || "",
+      review_reason: mapping.review_reason || "",
       enabled: hasValue && confidence >= 0.6,
       edited: false
     };
@@ -531,7 +535,7 @@ function createMappingContext() {
 }
 
 function detectRepeatableType(field, lowerText) {
-  const explicitType = normalize(field.repeatable_type || "");
+  const explicitType = String(field.repeatable_type || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
   if (REPEATABLE_CONFIGS[explicitType]) {
     return explicitType;
   }
@@ -546,7 +550,8 @@ function detectRepeatableType(field, lowerText) {
 }
 
 function detectRepeatableRole(type, field, lowerText) {
-  const explicitRole = normalize(field.field_role || "");
+  const explicitRole = String(field.field_role || "").trim().toLowerCase().replace(/[\s-]+/g, "_")
+    .replace(/^(start|end)_(year|month|day)$/, "$1_date");
   if (explicitRole && REPEATABLE_CONFIGS[type].roles[explicitRole]) {
     return explicitRole;
   }
@@ -604,10 +609,10 @@ function parseExplicitIndex(field) {
 }
 
 function scoreRepeatableField(field, lowerText, type, role) {
-  if (field.field_role && normalize(field.field_role) === role) {
+  if (field.field_role && normalize(field.field_role) === normalize(role)) {
     return 0.96;
   }
-  if (field.repeatable_type && normalize(field.repeatable_type) === type) {
+  if (field.repeatable_type && normalize(field.repeatable_type) === normalize(type)) {
     return 0.9;
   }
   const roleToken = firstMatchedToken(lowerText, REPEATABLE_CONFIGS[type].roles[role]);

@@ -50,12 +50,13 @@ async function activeTab() {
 }
 
 async function install(tabId) {
-  await chrome.scripting.executeScript({ target: { tabId }, files: ["content_script.js", "job_context.js"] });
+  await chrome.scripting.executeScript({ target: { tabId }, files: ["form_controls.js", "content_script.js", "job_context.js"] });
 }
 
 function fingerprint(fields) {
   return JSON.stringify(fields.map(field => [field.selector, field.label, field.name, field.type,
-    field.required, field.value, field.options, field.repeatable_type, field.repeatable_index]));
+    field.required, field.value, field.options, field.repeatable_type, field.repeatable_index,
+    field.field_role, field.date_part, field.min, field.max, field.step, field.multiple, field.disabled, field.read_only]));
 }
 
 function clearReview() {
@@ -109,12 +110,14 @@ function renderProfiles(selected = state.profiles[0]?.id) {
 }
 
 async function chooseProfile() {
+  panelPreferenceCatalog = null;
   stopPolling(); clearReview();
   state.profile = state.profiles.find(item => item.id === $("profiles").value) || null;
   state.record = null; $("review").hidden = true;
   if (!state.profile) return;
   const archive = await jsonAPI("");
   state.profile.revision = archive.revision;
+  await loadPreferences(archive.preferences);
   await chrome.storage.local.set({ selectedProfile: state.profile.id });
   await refreshHistory();
 }
@@ -167,7 +170,7 @@ async function generate() {
     method: "POST", headers: { "Idempotency-Key": crypto.randomUUID() },
     body: JSON.stringify({ page_url: tab.url, job_url: lastJob?.jd_text === jd ? lastJob.job_url : tab.url,
       jd_text: jd, target_company: $("company").value, target_role: $("role").value,
-      expected_revision: archive.revision })
+      expected_revision: archive.revision, preferences: readPanelPreferences() })
   });
   state.record = record;
   await rememberSession(tab.id, record);
@@ -197,6 +200,8 @@ async function pollRecord(epoch) {
 }
 
 function renderRecord() {
+  loadPreferences(state.record.preferences).catch(error => status(error.message, true));
+  $("record-preferences").textContent = `本版本偏好：${describePanelPreferences(state.record.preferences)}`;
   $("review").hidden = false;
   $("company").value = state.record.target_company;
   $("role").value = state.record.target_role;
@@ -257,7 +262,7 @@ function renderMappings() {
     hint.textContent = ["radio", "checkbox", "password"].includes(item.field_type)
       ? "请在招聘页面手动处理此控件。"
       : item.matched_resume_path ? `匹配程度 ${Math.round(item.confidence * 100)}% · 来自基础资料或微调简历，请核对`
-      : "未找到可用资料，请补充或跳过";
+      : item.review_reason || "未找到可用资料，请补充或跳过";
     const change = () => {
       item.enabled = check.checked; item.fill_value = value.value; item.edited = true;
       if (value.value.trim() && !item.matched_resume_path) item.matched_resume_path = "user_input";
@@ -380,12 +385,15 @@ async function action(fn) {
   try { await fn(); } catch (error) { status(error.message || String(error), true); }
   finally {
     state.busy = false; controls.forEach((control, index) => { control.disabled = disabledStates[index]; });
+    // Profile loading may create selectors after the initial control snapshot.
+    $("preferences-fields").querySelectorAll("select").forEach(select => { select.disabled = !state.profile; });
     if (state.record?.draft) renderRecord();
     updateConfirm();
   }
 }
 
 $("open-app").addEventListener("click", () => action(() => chrome.tabs.create({ url: `${baseURL()}/app/` })));
+$("open-positions").addEventListener("click", () => action(() => chrome.tabs.create({ url: `${baseURL()}/app/positions.html${state.profile ? `?profile=${encodeURIComponent(state.profile.id)}` : ""}` })));
 $("connect").addEventListener("click", () => action(connect));
 $("profiles").addEventListener("change", () => action(chooseProfile));
 $("detect").addEventListener("click", () => action(detect));
@@ -408,10 +416,10 @@ $("undo").addEventListener("click", () => action(async () => {
   clearReview();
 }));
 $("consent").addEventListener("change", updateConfirm);
-for (const id of ["company", "role", "jd"]) $(id).addEventListener("input", () => {
+for (const id of ["company", "role", "jd", "preferences-fields"]) $(id).addEventListener("input", () => {
   if (!state.record) return;
   stopPolling(); clearReview(); state.record = null; $("review").hidden = true;
-  status("岗位信息已修改，请重新生成对应版本；原版本可在记录列表恢复。");
+  status("岗位信息或偏好已修改，请重新生成对应版本；原版本可在记录列表恢复。");
 });
 $("auto-generate").addEventListener("change", () => chrome.storage.local.set({ autoGenerate: $("auto-generate").checked }));
 $("upload").addEventListener("change", () => { $("consent").checked = false; updateConfirm(); });
@@ -459,3 +467,29 @@ chrome.tabs.onUpdated.addListener((tabId, change) => {
   if (tabId === state.tab?.id && change.status === "complete" && !state.busy && state.profile && !state.record) action(restore);
 });
 action(restore);
+
+
+let panelPreferenceCatalog = null;
+async function loadPreferences(preferences = {}) {
+  if (!panelPreferenceCatalog) {
+    const response = await fetch(`${baseURL()}/api/v1/resume-preferences`);
+    if (!response.ok) throw new Error("无法读取偏好设置，请重新连接服务。");
+    panelPreferenceCatalog = await response.json();
+  }
+  const labels = { region: "目标国家 / 地区", job_family: "岗位族", hiring_track: "招聘类型", seniority: "目标资历", language: "输出语言", tone: "表达语气", page_count: "目标页数", template: "版式" };
+  const root = $("preferences-fields"); root.replaceChildren();
+  for (const [key, options] of Object.entries(panelPreferenceCatalog.options)) {
+    const label = document.createElement("label"); label.textContent = labels[key];
+    const select = document.createElement("select"); select.dataset.preference = key;
+    for (const [value, text] of Object.entries(options)) select.add(new Option(text, value));
+    select.value = preferences[key] || panelPreferenceCatalog.defaults[key];
+    select.disabled = state.busy; label.append(select); root.append(label);
+  }
+}
+function readPanelPreferences() {
+  if (!panelPreferenceCatalog) throw new Error("请先连接档案并载入偏好设置。");
+  return Object.fromEntries([...$("preferences-fields").querySelectorAll("select")].map(select => [select.dataset.preference, select.value]));
+}
+function describePanelPreferences(preferences = {}) {
+  return Object.entries(preferences).map(([key, value]) => panelPreferenceCatalog?.options[key]?.[value] || value).join(" · ");
+}

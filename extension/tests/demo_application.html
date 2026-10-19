@@ -7,10 +7,18 @@
 <label for="email">邮箱</label><input id="email" type="email" required>
 <label for="phone">电话</label><input id="phone" type="tel">
 <label for="intro">自我介绍</label><textarea id="intro"></textarea>
+<fieldset data-repeatable-section="education"><legend>教育经历</legend>
+<label>学校<input id="school" data-repeatable-type="education" data-repeatable-index="0" data-field-role="school"></label>
+<label>学历<select id="degree" data-repeatable-type="education" data-repeatable-index="0" data-field-role="degree"><option value="">请选择</option><option value="bachelor">Bachelor's degree</option><option value="master">Master's degree</option></select></label>
+<label>入学年份<select id="education-start-year" data-repeatable-type="education" data-repeatable-index="0" data-field-role="start_date" data-date-part="year"><option value="">请选择年份</option><option value="year-2023">2023年</option><option value="year-2024">2024年</option></select></label>
+<label>入学月份<select id="education-start-month" data-repeatable-type="education" data-repeatable-index="0" data-field-role="start_date" data-date-part="month"><option value="">请选择月份</option><option value="0">January</option><option value="5">June</option><option value="8">September</option></select></label>
+</fieldset>
 <div id="projects"><fieldset data-repeatable-section="projects"><legend>项目经历</legend>
 <label>项目名称<input data-repeatable-type="projects" data-repeatable-index="0" data-field-role="name"></label>
 <label>项目角色<input data-repeatable-type="projects" data-repeatable-index="0" data-field-role="role"></label>
 <label>项目描述<textarea data-repeatable-type="projects" data-repeatable-index="0" data-field-role="description"></textarea></label>
+<label>开始时间<input type="month" data-repeatable-type="projects" data-repeatable-index="0" data-field-role="start_date"></label>
+<label>结束时间<input type="month" data-repeatable-type="projects" data-repeatable-index="0" data-field-role="end_date"></label>
 </fieldset></div>
 <button id="add-project" type="button" data-add-section="projects" onclick="addProject()">新增项目</button>
 <label for="salary">期望薪资</label><input id="salary">
