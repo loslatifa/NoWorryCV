@@ -114,6 +114,16 @@ python scripts/evaluate_quality.py --provider stub
 
 后端测试使用 stub 模型验证流程，不调用真实模型。插件的本地模拟投递页与手动验收步骤见 [插件说明](../extension/README.md#验证)。功能状态与后续规划见 [功能清单](../feature_list.json)。
 
+### 持续集成
+
+[CI 工作流](../.github/workflows/ci.yml) 在 push、pull request 和手动触发时运行，使用 Ubuntu 24.04，包含以下检查：
+
+- Python 3.9 / 3.12：运行全部非 PostgreSQL 后端测试。
+- PostgreSQL 16：连接独立服务数据库，运行存储、队列、迁移和恢复集成测试。
+- Node.js 22：运行工作台与插件 JavaScript 测试，生成 OpenAPI 与 TypeScript 类型并检查已提交文件是否一致，构建 React 编辑器。
+
+API 类型检查失败时，在本地执行前述类型生成命令，并将 `frontend/src/api.generated.ts` 随 API 改动一起提交。CI 使用 stub 模型，无需模型密钥；PostgreSQL 服务仅用于测试。应用镜像构建及容器内运行验收仍需单独完成。
+
 结果页支持评价整份已保存版本或单条修改；「反馈与质量概览」可以按招聘类型和语言查看当前保存期内的指标。模型与提示词升级的基线对照、指标定义和评测集维护规则见 [质量评测说明](../evals/README.md)。
 
 2026-10-15 已切换到 DeepSeek 官方 `deepseek-flash`，连通性和 JSON 输出通过，引用修复后的四个合成样例真实模型回归全部通过，与已有基线相比无回退。详细指标和验证边界见 [DeepSeek 验证记录](../evals/reports/2026-10-15-deepseek-flash.md)；此前 Qwen 的失败记录见 [早期验证记录](../evals/reports/2026-10-15.md)。

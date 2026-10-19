@@ -825,6 +825,34 @@
         "本地 PostgreSQL 16 集成及全量后端 322 项测试通过，前端与插件 JavaScript 24 项通过，编辑器构建、浏览器流程及 wheel 嵌套资源验证通过；模型使用 stub。",
         "补验真实应用进程重启后任务、版本与正文恢复；修正正文聚焦时直接撤销的显示同步，320 / 390 / 768 / 1024 / 1440 像素布局通过。仅 run 链接按任务历史恢复指定任务，run+profile 及仅档案凭据访问通过。"
       ]
+    },
+    {
+      "id": "P1-008",
+      "priority": "P1",
+      "status": "in_progress",
+      "category": "工程与交付",
+      "name": "持续集成：后端、PostgreSQL、前端与 API 类型检查",
+      "requirements": [
+        "push、pull_request 和手动触发 GitHub Actions",
+        "Python 3.9 / 3.12 后端回归及独立 PostgreSQL 16 集成测试",
+        "Node.js 22 运行工作台与插件 JavaScript 测试、API 类型一致性检查及 React 构建",
+        "测试使用 stub 模型和独立数据库，不配置真实模型密钥"
+      ],
+      "acceptance_criteria": [
+        "工作流语法及本地对应检查通过",
+        "当前分支的 GitHub Actions 全部检查通过",
+        "API 变化未同步提交生成类型时检查失败"
+      ],
+      "release": "当前开发中",
+      "delivery_notes": [
+        "2026-10-19 登记并开始接入持续集成；应用 Docker 运行验收继续保留为 P1-007 待验项。",
+        "新增 CI 工作流，push / pull_request / workflow_dispatch 自动运行；Python 3.9 与 3.12 后端、PostgreSQL 16 专用服务、Node.js 22 JavaScript 检查及 React 构建。",
+        "本地全新 Python 3.9 / 3.12 环境各 316 项后端测试通过，PostgreSQL 6 项、JavaScript 24 项通过；API 类型生成一致、模拟 Schema 变化能够触发差异检查失败，React 构建及 actionlint 检查通过。"
+      ],
+      "implementation_status": "implemented",
+      "pending_validation": [
+        "GitHub Actions 首次远程运行验收"
+      ]
     }
   ],
   "recommended_delivery_order": [
@@ -859,7 +887,8 @@
         "P1-004",
         "P1-005",
         "P1-006",
-        "P1-007"
+        "P1-007",
+        "P1-008"
       ]
     },
     {
